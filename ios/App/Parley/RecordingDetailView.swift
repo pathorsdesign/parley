@@ -1,24 +1,29 @@
 import ParleyKit
 import SwiftUI
 
-/// A synced recording, read and played back — the phone's reading room.
+/// A synced recording's result page — the desktop's report
+/// (`src/components/study/StudyScreen.tsx`), on a phone.
 ///
-/// Two faces under one pinned player: **Summary** (what the meeting came to —
-/// brief, action items, highlights, speakers; `RecordingSummaryView`) and
-/// **Transcript** (what was said, and nothing else). They used to be one
-/// scroll, the analysis's highlight paragraphs stacked on top of the turns, and
-/// two different kinds of content read as one long document that was neither.
-/// See `docs/design/ios-recording-page.md`.
+/// One header over five tabs. The header is the recording's own: its name,
+/// large, renamed in place (with a quiet 「自動命名」 tag while the name is the
+/// one the filing pass just gave it), where it is filed (`FilingRow`, which is
+/// also where a folder is suggested), and the tabs — 總結 (the brief),
+/// 後續行動 (action items and the brief's next steps), 筆記 and 會議背景 (the
+/// meeting context the desktop synced, each only when there is one) and 回放,
+/// the replay workbench: the player, the highlights and the transcript. There
+/// is no 評分: the phone has no delivery data to score.
 ///
-/// The player is a pinned block under the navigation bar that both faces scroll
-/// *under* rather than past. Pinned because scrubbing is the thing you do while
-/// reading — finding the paragraph and then hearing how it was said — and a
-/// player that scrolled away would have to be chased back.
+/// The player lives on 回放 because scrubbing is something you do while reading
+/// the transcript — finding the paragraph and then hearing how it was said —
+/// and nowhere else. It is pinned at the top of that tab, the transcript
+/// scrolling under it, and it keeps playing when another tab is up (the tab
+/// row then carries a pause).
 ///
-/// The faces are wired together: a timestamp anywhere in the summary switches
-/// to the transcript, seeks there and lights the turn for a moment. Within the
-/// transcript the audio lights the turn it is inside, and tapping a turn — its
-/// timecode or the words themselves — seeks the audio to where it starts.
+/// The tabs are wired together: a timestamp on any of them switches to 回放,
+/// seeks there and lights the turn for a moment (the desktop's
+/// `useSeekToReplay`). Within the transcript the audio lights the turn it is
+/// inside, and tapping a turn — its timecode or the words themselves — seeks
+/// the audio to where it starts.
 struct RecordingDetailView: View {
     @EnvironmentObject private var app: AppState
     /// The same model the library row drives, so a download started from either
@@ -59,27 +64,27 @@ struct RecordingDetailView: View {
         case share
     }
 
-    /// Which of the two faces is up. See the type doc.
-    enum Face: Hashable {
-        case summary, transcript
-    }
-
     @State private var meta: RecordingMeta?
     @State private var error: String?
-    /// Chosen once, when the recording first loads: the summary when there is
-    /// any analysis to show, the transcript otherwise. After that it is the
-    /// reader's — a reload must not flip the face out from under them.
-    @State private var face: Face = .transcript
-    @State private var faceChosen = false
+    /// Chosen once, when the recording first loads: the tab this recording was
+    /// last left on in this session, else 總結 when there is any analysis to
+    /// read and 回放 when there is only the transcript. After that it is the
+    /// reader's — a reload must not flip the tab out from under them.
+    @State private var tab: ResultTab = .replay
+    @State private var tabChosen = false
+    /// The tab each recording was last left on, this session. In memory on
+    /// purpose: coming back to a recording a minute later should land where
+    /// you were, and a recording opened next week should open on its summary.
+    @MainActor private static var rememberedTabs: [String: ResultTab] = [:]
     /// The turn a jump from the summary landed on, washed in the tint for a
     /// moment so the eye finds it. Also the guided lap's "this is a turn" pulse.
     @State private var litTurn: String?
-    /// A jump the transcript face has to scroll to. A counter beside the target
+    /// A jump the transcript has to scroll to. A counter beside the target
     /// so the same turn twice is still two requests.
     @State private var jumpTarget: String?
     @State private var jumpRequest = 0
-    /// What the navigation bar says. Seeded from the library row and changed by
-    /// a rename on this screen; `summary` is a `let`.
+    /// The recording's name as the header shows it. Seeded from the library row
+    /// and changed by a rename on this screen; `summary` is a `let`.
     @State private var displayTitle: String
     /// One player per detail screen, built from the recording's id so the peaks
     /// cache and the audio it belongs to can find each other.
@@ -178,15 +183,25 @@ struct RecordingDetailView: View {
     /// The recording moved out of this library; pop once the picker is gone.
     @State private var leaveAfterMove = false
 
-    /// The filing suggestion — the ended meeting's (`endedMeeting`), or else
-    /// the one the recording carries pending — shown above the face switcher.
-    /// See `FilingSuggestionCard`.
+    /// The filing pass — the ended meeting's (`endedMeeting`), or else the
+    /// suggestion the recording carries pending. It names the recording by
+    /// itself; its folder half is offered in the header's `FilingRow`.
     @StateObject private var filing = FilingSuggestionModel()
     /// The offer has been answered on this screen; do not present it again
     /// when the folder list lands.
     @State private var suggestionRetired = false
-    /// The card's "look here" wash, asked for by the guide bar.
-    @State private var cardHighlighted = false
+    /// The filing row's "look here" wash, asked for by the guide bar.
+    @State private var rowHighlighted = false
+    /// Which recordings the filing pass named this session — the header's
+    /// 「自動命名」 tag.
+    @ObservedObject private var autoNamed = AutoNamedTitles.shared
+    /// The delete confirmation is up, and why a delete did not happen.
+    @State private var confirmingDelete = false
+    @State private var deleteError: String?
+    /// The menu's glyph is a checkmark for a moment after a copy — the app has
+    /// no toast layer, so the control that did it says so.
+    @State private var copied = false
+    @State private var copiedRevert: Task<Void, Never>?
 
     @ObservedObject private var gettingStarted = GettingStartedStore.shared
     /// The guide bar's step and its ✓ hold. See `GuideBar`.
@@ -243,7 +258,7 @@ struct RecordingDetailView: View {
     var body: some View {
         Group {
             if let meta {
-                faces(meta)
+                page(meta)
             } else if let error {
                 ContentUnavailableView(
                     "Couldn't load", systemImage: "exclamationmark.triangle",
@@ -252,30 +267,21 @@ struct RecordingDetailView: View {
                 ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .navigationTitle(
-            displayTitle.isEmpty ? String(localized: "Untitled recording") : displayTitle)
+        // No title in the bar: the name is the header's, large, under it. The
+        // bar keeps the back chevron and, on the right, the page's two
+        // actions — the header's top row, on a phone.
         .navigationBarTitleDisplayMode(.inline)
         .background(Theme.background)
         .toolbar {
-            // The overflow menu goes innermost, ahead of the controls that were
-            // here first: download and copy are the actions on this screen and
-            // copy keeps the outermost trailing position it has always had.
-            ToolbarItem(placement: .topBarTrailing) { overflowMenu }
-            // Search sits out here as its own button rather than as another
-            // row in the overflow menu. Two reasons: finding a phrase is
-            // something you do *while reading*, over and over, where
-            // re-transcribing is a once-ever action; and the overflow menu is
-            // personal-scope only, so a search buried in it would not exist at
-            // all on an org recording.
+            // Left to right as declared: search (回放 only), then the desktop's
+            // AskYourAi, then its 複製 menu in the outermost slot.
+            //
+            // Search is its own button rather than a menu row: finding a
+            // phrase is something you do *while reading*, over and over. It
+            // belongs to 回放, where the transcript is.
             ToolbarItem(placement: .topBarTrailing) { searchButton }
-            ToolbarItem(placement: .topBarTrailing) { downloadControl }
-            ToolbarItem(placement: .topBarTrailing) {
-                TranscriptShareMenu(
-                    plain: plainTranscript,
-                    withPrompt: handoffText,
-                    isEmpty: readable.isEmpty,
-                    share: { sharingToAI = true })
-            }
+            ToolbarItem(placement: .topBarTrailing) { askYourAI }
+            ToolbarItem(placement: .topBarTrailing) { moreMenu }
         }
         .sheet(isPresented: $sharingToAI) {
             ShareSheet(items: [handoffText()]) { completed in
@@ -312,7 +318,29 @@ struct RecordingDetailView: View {
                     choosingFolder = true
                 }
             }
+            // `adjust`: the filing row's 「選其他資料夾…」, opened with nobody
+            // tapping — `simctl` cannot tap.
+            .onReceive(ScreenshotDemo.shared.$openFilingAdjust) { open in
+                if open { choosingFolder = true }
+            }
         #endif
+        .confirmationDialog(
+            "Delete this recording?",
+            isPresented: $confirmingDelete,
+            titleVisibility: .visible
+        ) {
+            Button("Delete", role: .destructive) { Task { await deleteRecording() } }
+        } message: {
+            Text(
+                "The recording, its transcript and its summary are deleted everywhere. This cannot be undone."
+            )
+        }
+        .alert(
+            deleteError ?? "",
+            isPresented: Binding(get: { deleteError != nil }, set: { if !$0 { deleteError = nil } })
+        ) {
+            Button("OK", role: .cancel) {}
+        }
         .confirmationDialog(
             "Re-transcribe this recording?",
             isPresented: $confirmingReTranscribe,
@@ -360,13 +388,12 @@ struct RecordingDetailView: View {
     private var audioURL: URL? { downloads.url(for: summary.id) }
 
     /// Shows and hides the search field. Absent when there is no transcript to
-    /// search, for the same reason the copy button goes inert on an empty one —
-    /// and absent on the summary face, because what it searches is the
-    /// transcript and the field would open over a page it cannot find anything
-    /// on.
+    /// search, and absent on every tab but 回放, because what it searches is
+    /// the transcript and the field would open over a page it cannot find
+    /// anything on.
     @ViewBuilder
     private var searchButton: some View {
-        if !readable.isEmpty && face == .transcript {
+        if !readable.isEmpty && tab == .replay {
             Button {
                 searching.toggle()
             } label: {
@@ -429,71 +456,176 @@ struct RecordingDetailView: View {
         }
     }
 
-    /// Fetch this recording's audio, or show how far that has got.
+    /// 交給你的 AI — the desktop's AskYourAi, mapped to what the phone has: the
+    /// share sheet, with the analysis prompt wrapped around the transcript.
+    /// ChatGPT and Claude are both in it. (The Mac's button connects an AI over
+    /// MCP instead; a phone has nothing to connect.)
+    private var askYourAI: some View {
+        Button {
+            sharingToAI = true
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: "sparkles")
+                    .font(.parley.caption.weight(.semibold))
+                    .accessibilityHidden(true)
+                Text("Hand it to your AI")
+                    .font(.parley.footnote.weight(.semibold))
+                    .lineLimit(1)
+            }
+            .fixedSize()
+        }
+        .disabled(readable.isEmpty)
+    }
+
+    /// Everything else the page can do, behind one glyph — the desktop's 複製
+    /// menu, with the actions the phone's toolbar used to spread over three
+    /// buttons: copy (the open tab, the transcript, the transcript with the
+    /// analysis prompt), download, move, re-transcribe, delete.
     ///
-    /// Nothing at all once the audio is here: the toolbar's job is to *get* the
-    /// file, and a recording whose audio is on the phone has the player below
-    /// where a permanent "downloaded" badge would only take up the slot.
+    /// Re-transcribing and deleting sit last and behind a confirmation each:
+    /// one spends transcription hours, the other cannot be undone, and neither
+    /// should be one mis-tap away from "copy".
     ///
-    /// Personal scope only, for the same reason as the library row — see
-    /// `LibraryView.downloadAction`. A failed attempt falls back to the button,
-    /// which is the retry.
+    /// Download, re-transcribe and delete are personal-scope only: they go
+    /// through the personal recording endpoints, so an org recording read on
+    /// this phone is offered copy and (within its organization) move.
+    private var moreMenu: some View {
+        Menu {
+            Section {
+                if tab != .replay, let page = pageText() {
+                    Button {
+                        copy(page)
+                    } label: {
+                        Label(copyPageLabel, systemImage: "doc.on.doc")
+                    }
+                }
+                Button {
+                    copy(plainTranscript())
+                } label: {
+                    Label("Copy transcript", systemImage: "text.quote")
+                }
+                .disabled(readable.isEmpty)
+                Button {
+                    if copy(handoffText()) { GettingStartedStore.shared.mark(.sharedToAI) }
+                } label: {
+                    Label("Copy transcript with analysis prompt", systemImage: "doc.on.clipboard")
+                }
+                .disabled(readable.isEmpty)
+            }
+            Section {
+                downloadItem
+                if orgId == nil || !folders.isEmpty {
+                    Button("Move to folder…", systemImage: "folder") {
+                        choosingFolder = true
+                    }
+                }
+            }
+            // The sample's transcript is written, not transcribed, and its
+            // audio is not in the cloud to be sent again.
+            if orgId == nil, !isSample {
+                Section {
+                    Button("Re-transcribe", systemImage: "arrow.clockwise") {
+                        confirmingReTranscribe = true
+                    }
+                    .disabled(!canReTranscribe)
+                } header: {
+                    // Localized on the way in by `reTranscribeNote`, so
+                    // `verbatim` — a key lookup here would look up a sentence
+                    // that is already the answer.
+                    if let note = reTranscribeNote { Text(verbatim: note) }
+                }
+            }
+            if orgId == nil {
+                Section {
+                    Button("Delete", systemImage: "trash", role: .destructive) {
+                        confirmingDelete = true
+                    }
+                }
+            }
+        } label: {
+            Image(systemName: copied ? "checkmark" : "ellipsis.circle")
+                .contentTransition(.symbolEffect(.replace))
+                .accessibilityLabel(copied ? Text("Copied") : Text("More"))
+        }
+    }
+
+    /// Fetch this recording's audio, or say how far that has got. Nothing once
+    /// the audio is here: the player on 回放 is the proof. Personal scope only,
+    /// for the same reason as the library row — see
+    /// `LibraryView.downloadAction`. A failed attempt falls back to the
+    /// button, which is the retry.
     @ViewBuilder
-    private var downloadControl: some View {
-        if orgId == nil {
+    private var downloadItem: some View {
+        if orgId == nil, !isSample {
             switch downloads.state(for: summary.id) {
             case .absent, .failed:
-                Button {
+                Button("Download", systemImage: "arrow.down.circle") {
                     Task { await downloads.download(summary.id, cloud: app.cloud) }
-                } label: {
-                    Label("Download", systemImage: "arrow.down.circle")
                 }
             case .downloading(let fraction):
-                DownloadRing(fraction: fraction, size: 20)
+                Button {
+                } label: {
+                    Label(
+                        "Downloading… \(Int((fraction * 100).rounded()))%",
+                        systemImage: "arrow.down.circle.dotted")
+                }
+                .disabled(true)
             case .local:
                 EmptyView()
             }
         }
     }
 
-    /// Everything that is not download and not copy — which today is one thing.
-    ///
-    /// A menu rather than a third toolbar button because of what the thing is:
-    /// re-transcribing spends transcription hours and rewrites the document on
-    /// screen, and an action like that should not sit one mis-tap away from
-    /// "copy". The ellipsis costs a tap and buys a confirmation the user chose
-    /// to walk towards.
-    ///
-    /// Personal scope only, the same rule as `downloadControl`: the re-push
-    /// goes through the personal recording endpoints, so an org recording read
-    /// on this phone has nothing here to offer and the menu is absent rather
-    /// than present and dead.
-    @ViewBuilder
-    private var overflowMenu: some View {
-        if orgId == nil {
-            Menu {
-                Button("Move to folder…", systemImage: "folder") {
-                    choosingFolder = true
-                }
-                // The sample's transcript is written, not transcribed, and its
-                // audio is not in the cloud to be sent again.
-                if !isSample {
-                    Section {
-                        Button("Re-transcribe", systemImage: "arrow.clockwise") {
-                            confirmingReTranscribe = true
-                        }
-                        .disabled(!canReTranscribe)
-                    } header: {
-                        // Localized on the way in by `reTranscribeNote`, so
-                        // `verbatim` — a key lookup here would look up a sentence
-                        // that is already the answer.
-                        if let note = reTranscribeNote { Text(verbatim: note) }
-                    }
-                }
-            } label: {
-                Label("More", systemImage: "ellipsis.circle")
-            }
+    /// 「複製總結」, named after the open tab so it says what lands on the
+    /// clipboard — the desktop's `study.copy.page`.
+    private var copyPageLabel: LocalizedStringKey {
+        switch tab {
+        case .summary: "Copy Summary"
+        case .actions: "Copy Actions"
+        case .notes: "Copy Notes"
+        case .context: "Copy Background"
+        case .replay: "Copy transcript"
         }
+    }
+
+    /// The open reading tab as plain text, or nil when it has nothing on it.
+    private func pageText() -> String? {
+        guard let meta else { return nil }
+        let text: String
+        switch tab {
+        case .summary:
+            let split = BriefSections.split(meta.brief)
+            text = ([split.lead] + split.sections.map { "## \($0.title)\n\($0.body)" })
+                .filter { !$0.isEmpty }.joined(separator: "\n\n")
+        case .actions:
+            let items = meta.actionItems.map { item in
+                "- [\(item.done ? "x" : " ")] \(item.text)"
+                    + (item.owner.map { " (\($0))" } ?? "")
+                    + (item.atMs.map { " [\(TranscriptClipboard.clock($0))]" } ?? "")
+            }
+            let next = BriefSections.split(meta.brief).next.map { "## \($0.title)\n\($0.body)" }
+            text = ((items.isEmpty ? [] : [items.joined(separator: "\n")]) + next)
+                .joined(separator: "\n\n")
+        case .notes: text = notes(meta)
+        case .context: text = background(meta)
+        case .replay: return nil
+        }
+        return text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : text
+    }
+
+    /// Copy, and turn the menu's glyph into a checkmark for a moment.
+    @discardableResult
+    private func copy(_ payload: String) -> Bool {
+        guard !payload.isEmpty else { return false }
+        TranscriptClipboard.write(payload)
+        withAnimation { copied = true }
+        copiedRevert?.cancel()
+        copiedRevert = Task {
+            try? await Task.sleep(for: .seconds(1.5))
+            guard !Task.isCancelled else { return }
+            withAnimation { copied = false }
+        }
+        return true
     }
 
     /// The transcript has to be loaded — it is what the queued request carries
@@ -660,84 +792,157 @@ struct RecordingDetailView: View {
         return HandoffPrompt.build(summary: summary, meta: meta)
     }
 
-    /// Both faces, stacked, with only the chosen one visible and touchable.
+    /// The header over the tabs, and every tab built at once with only the
+    /// chosen one visible and touchable.
     ///
-    /// Stacked rather than swapped so each keeps its own scroll position: the
-    /// reader who jumps from a highlight into the transcript and comes back
-    /// finds the summary where they left it, and the transcript keeps
-    /// following the audio while the summary is up.
-    ///
-    /// `safeAreaInset` is what pins the player and the face switcher: each
-    /// face's scroll view keeps its own scrolling and its own safe area, and the
-    /// block occupies the top of both without being part of either.
-    private func faces(_ meta: RecordingMeta) -> some View {
-        ZStack {
-            summaryFace(meta)
-                .opacity(face == .summary ? 1 : 0)
-                .allowsHitTesting(face == .summary)
-                .accessibilityHidden(face != .summary)
-            transcript(meta)
-                .opacity(face == .transcript ? 1 : 0)
-                .allowsHitTesting(face == .transcript)
-                .accessibilityHidden(face != .transcript)
-        }
-        .safeAreaInset(edge: .top, spacing: 0) {
-            VStack(spacing: 0) {
-                PlaybackBar(
-                    controller: playback, summary: summary, orgId: orgId,
-                    markers: meta.findings.map { Double($0.atMs) / 1000 })
-                folderChip
-                // Above the switch: the suggestion is about the whole
-                // recording, not about either face.
-                if orgId == nil {
-                    FilingSuggestionCard(model: filing, highlighted: cardHighlighted)
+    /// Stacked rather than swapped so each keeps its own scroll position — the
+    /// reader who jumps from the summary into 回放 and comes back finds the
+    /// summary where they left it (the desktop's `KeptTabs`) — and so the
+    /// transcript keeps following the audio while another tab is up.
+    private func page(_ meta: RecordingMeta) -> some View {
+        let tabs = availableTabs(meta)
+        let shown = tabs.contains(tab) ? tab : .summary
+        return VStack(spacing: 0) {
+            header(meta, tabs: tabs, shown: shown)
+            ZStack {
+                ForEach(tabs, id: \.self) { candidate in
+                    tabPage(candidate, meta: meta)
+                        .opacity(candidate == shown ? 1 : 0)
+                        .allowsHitTesting(candidate == shown)
+                        .accessibilityHidden(candidate != shown)
                 }
-                if let micPrompt {
-                    FeedbackPromptCard(
-                        trigger: .micRecovery,
-                        recordingId: micPrompt.id,
-                        text: Text(
-                            "The microphone dropped \(micPrompt.micRecoveries) times during this recording."),
-                        send: {
-                            self.micPrompt = nil
-                            micPrompt.sendMicRecoveryReport()
-                        },
-                        close: { withAnimation { self.micPrompt = nil } })
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 6)
-                }
-                // Pinned with the player rather than put in the transcript:
-                // the strip is about the whole recording, and it has to be
-                // readable from the summary face too.
-                truncatedStrip(meta)
-                if showsReTranscribeChips {
-                    RetranscribeChips(
-                        recordingId: summary.id,
-                        send: { tag in
-                            showsReTranscribeChips = false
-                            sendFeedback(.retranscribe, meta: meta, tags: [tag.rawValue])
-                        },
-                        close: { showsReTranscribeChips = false })
-                }
-                faceSwitcher
-                if searching && face == .transcript { searchField }
             }
-            // Opaque as a whole, not piece by piece: both faces scroll *under*
-            // this block, and the filing card is deliberately see-through (its
-            // only fill is the highlight tint), so without a ground of its own
-            // the transcript showed through the card's title and chips on the
-            // way up. The sample recording always carries a pending card, which
-            // is where it read as a broken layout.
-            .background(Theme.background)
+            .frame(maxHeight: .infinity)
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             guideBar
         }
-        // Search belongs to the transcript. Leaving the face closes it, which
+        // Search belongs to the transcript. Leaving 回放 closes it, which
         // also clears the query (see `onChange(of: searching)`).
-        .onChange(of: face) { _, now in
-            if now == .summary { searching = false }
+        .onChange(of: tab) { _, now in
+            if now != .replay { searching = false }
+            Self.rememberedTabs[summary.id] = now
         }
+    }
+
+    /// The desktop's order, 筆記 and 會議背景 only when the meeting has them.
+    private func availableTabs(_ meta: RecordingMeta) -> [ResultTab] {
+        ResultTab.allCases.filter { candidate in
+            switch candidate {
+            case .notes: !notes(meta).isEmpty
+            case .context: !background(meta).isEmpty
+            default: true
+            }
+        }
+    }
+
+    private func notes(_ meta: RecordingMeta) -> String {
+        MeetingContextParts.notes(meta.meetingContext)
+    }
+
+    private func background(_ meta: RecordingMeta) -> String {
+        MeetingContextParts.background(meta.meetingContext)
+    }
+
+    /// The recording's own header: name, filing row, the prompts about the
+    /// whole recording, and the tabs. It does not scroll — the tabs do, under
+    /// it — so 「變更」 and the tabs are always a tap away.
+    private func header(_ meta: RecordingMeta, tabs: [ResultTab], shown: ResultTab) -> some View {
+        VStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 6) {
+                RecordingTitleView(
+                    title: displayTitle,
+                    editable: orgId == nil,
+                    autoNamed: autoNamed.ids.contains(summary.id),
+                    rename: rename)
+                filingRow
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 20)
+            .padding(.top, 4)
+            .padding(.bottom, 6)
+            // The ended meeting's microphone question stays near the top, as
+            // the record screen's card did before End brought the user here.
+            if let micPrompt {
+                FeedbackPromptCard(
+                    trigger: .micRecovery,
+                    recordingId: micPrompt.id,
+                    text: Text(
+                        "The microphone dropped \(micPrompt.micRecoveries) times during this recording."),
+                    send: {
+                        self.micPrompt = nil
+                        micPrompt.sendMicRecoveryReport()
+                    },
+                    close: { withAnimation { self.micPrompt = nil } })
+                .padding(.horizontal, 20)
+                .padding(.vertical, 6)
+            }
+            // Here rather than in the transcript: the strip is about the
+            // whole recording, and it has to be readable from every tab.
+            truncatedStrip(meta)
+            if showsReTranscribeChips {
+                RetranscribeChips(
+                    recordingId: summary.id,
+                    send: { tag in
+                        showsReTranscribeChips = false
+                        sendFeedback(.retranscribe, meta: meta, tags: [tag.rawValue])
+                    },
+                    close: { showsReTranscribeChips = false })
+            }
+            ResultTabBar(
+                tabs: tabs,
+                selection: Binding(get: { shown }, set: { tab = $0 }),
+                counts: [.actions: meta.actionItems.count, .notes: noteLines(meta)],
+                playingElsewhere: playback.isPlaying && shown != .replay,
+                pause: { playback.pause() })
+        }
+        .background(Theme.background)
+    }
+
+    /// How many lines of notes were taken — the count beside 筆記.
+    private func noteLines(_ meta: RecordingMeta) -> Int {
+        notes(meta).split(separator: "\n").filter {
+            !$0.trimmingCharacters(in: .whitespaces).isEmpty
+        }.count
+    }
+
+    @ViewBuilder
+    private func tabPage(_ candidate: ResultTab, meta: RecordingMeta) -> some View {
+        switch candidate {
+        case .summary:
+            SummaryPage(
+                meta: meta, canGenerate: !readable.isEmpty,
+                seek: { jump(to: $0) }, generate: { sharingToAI = true })
+        case .actions:
+            ActionsPage(
+                meta: meta, folderName: currentFolderName, canTick: isSample,
+                seek: { jump(to: $0) },
+                tick: { id, done in tickActionItem(id, done: done) })
+        case .notes:
+            ContextPage(
+                caption: "Notes you took in the floating window during the meeting",
+                text: notes(meta), seek: { jump(to: $0) })
+        case .context:
+            ContextPage(
+                caption: "Prepared before the meeting; the AI reads it with the transcript",
+                text: background(meta), seek: { jump(to: $0) })
+        case .replay:
+            replay(meta)
+        }
+    }
+
+    /// 回放, the replay workbench: the player pinned at the top, the transcript
+    /// scrolling under it with the highlights above its first turn.
+    private func replay(_ meta: RecordingMeta) -> some View {
+        transcript(meta)
+            .safeAreaInset(edge: .top, spacing: 0) {
+                VStack(spacing: 0) {
+                    PlaybackBar(
+                        controller: playback, summary: summary, orgId: orgId,
+                        markers: meta.findings.map { Double($0.atMs) / 1000 })
+                    if searching { searchField }
+                }
+            }
     }
 
     // MARK: the guided lap
@@ -755,7 +960,7 @@ struct RecordingDetailView: View {
                 hasSuggestion: filing.hasSomethingToOffer,
                 showSuggestion: showSuggestion,
                 openTranscript: {
-                    face = .transcript
+                    tab = .replay
                     if let first = readable.first {
                         jumpTarget = first.id
                         jumpRequest += 1
@@ -776,17 +981,18 @@ struct RecordingDetailView: View {
         }
     }
 
-    /// Step 1's action: point at the card, or — a recording with no
-    /// suggestion pending — open the folder picker, which is the same lesson.
+    /// Step 1's action: point at the filing row's suggestion, or — a recording
+    /// with no suggestion pending — open the folder picker, which is the same
+    /// lesson.
     private func showSuggestion() {
         guard filing.hasSomethingToOffer else {
             choosingFolder = true
             return
         }
-        cardHighlighted = true
+        rowHighlighted = true
         Task { @MainActor in
             try? await Task.sleep(for: .seconds(1.2))
-            cardHighlighted = false
+            rowHighlighted = false
         }
     }
 
@@ -829,7 +1035,7 @@ struct RecordingDetailView: View {
                 onFolderChange?(folderId)
                 if let folderId {
                     let name = folders.first { $0.id == folderId }?.name ?? created?.name ?? ""
-                    lastFiling = (name, title != nil)
+                    lastFiling = (name, autoNamed.ids.contains(summary.id))
                 }
             }
         }
@@ -880,60 +1086,20 @@ struct RecordingDetailView: View {
         }
         filing.present(
             suggestion, currentTitle: displayTitle, currentFolderId: currentFolderId,
-            folders: folders, target: isSample ? .sample : .cloud(id: summary.id))
+            folders: folders, target: isSample ? .sample : .cloud(id: summary.id), app: app)
     }
 
-    /// 摘要 ｜ 逐字稿. The system segmented control, because two mutually
-    /// exclusive views of one thing is exactly what it is for, and it reads as
-    /// that on every iPhone without a word of explanation.
-    private var faceSwitcher: some View {
-        Picker("View", selection: $face) {
-            Text("Summary").tag(Face.summary)
-            Text("Transcript").tag(Face.transcript)
-        }
-        .pickerStyle(.segmented)
-        .labelsHidden()
-        .padding(.horizontal, 20)
-        .padding(.vertical, 8)
-        .background(Theme.background)
-        .overlay(alignment: .bottom) {
-            Rectangle()
-                .fill(Color(.separator))
-                .frame(height: 0.5)
-        }
-    }
-
-    private func summaryFace(_ meta: RecordingMeta) -> some View {
-        RecordingSummaryView(
-            meta: meta,
-            speakers: speakerNames(meta),
-            canTickActionItems: isSample,
-            canGenerate: !readable.isEmpty,
-            jump: { jump(to: $0) },
-            tickActionItem: { id, done in tickActionItem(id, done: done) },
-            generate: { sharingToAI = true })
-    }
-
-    /// The people in the transcript, in the order they first speak.
-    private func speakerNames(_ meta: RecordingMeta) -> [String] {
-        var names: [String] = []
-        for segment in readable {
-            let name = meta.speakerLabel(for: segment)
-            if !names.contains(name) { names.append(name) }
-        }
-        return names
-    }
-
-    /// The sample keeps its ticks on the phone. A cloud recording's summary
-    /// does not offer the tap at all — see `RecordingSummaryView`.
+    /// The sample keeps its ticks on the phone. A cloud recording's 後續行動
+    /// does not offer the tap at all — see `ActionsPage`.
     private func tickActionItem(_ id: String, done: Bool) {
         guard isSample else { return }
         SampleRecordingStore.shared.setActionItem(id, done: done)
         meta?.setActionItem(id, done: done)
     }
 
-    /// A moment in the summary, taken to the transcript: switch faces, send
-    /// the audio there, scroll the turn into view and light it.
+    /// A moment on any tab, taken to 回放 — the desktop's `useSeekToReplay`:
+    /// switch tabs, send the audio there, scroll the turn into view and light
+    /// it.
     ///
     /// The scroll is asked for separately from the seek because a recording
     /// whose audio is not on the phone cannot seek, and the jump must still
@@ -941,10 +1107,10 @@ struct RecordingDetailView: View {
     private func jump(to ms: UInt64) {
         let segments = readable
         guard let turn = TranscriptAnchor.turn(at: ms, in: segments) else {
-            face = .transcript
+            tab = .replay
             return
         }
-        face = .transcript
+        tab = .replay
         if playback.isSeekable {
             playback.seek(to: Double(TranscriptAnchor.seekMs(for: ms, in: segments)) / 1000)
         }
@@ -970,8 +1136,8 @@ struct RecordingDetailView: View {
     /// One continuous column, the way the desktop reads a transcript: turn
     /// after turn separated by whitespace. No rows, no rules, no cards — the
     /// speaker label is what marks a turn's start, so nothing else has to. The
-    /// analysis appears here only as a 💡 line under the turn a finding starts
-    /// in; the findings themselves live on the summary face.
+    /// analysis appears as the compact 重點 list above the first turn and as a
+    /// 💡 line under the turn each finding starts in.
     private func transcript(_ meta: RecordingMeta) -> some View {
         let segments = meta.segments.filter { $0.isFinal }
         let current = currentTurn(segments)
@@ -986,6 +1152,9 @@ struct RecordingDetailView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 22) {
                     reTranscribeStatus
+                    if !meta.findings.isEmpty {
+                        HighlightsStrip(findings: meta.findings) { jump(to: $0) }
+                    }
                     if segments.isEmpty {
                         emptyTranscript(meta)
                     }
@@ -1078,7 +1247,7 @@ struct RecordingDetailView: View {
                     proxy.scrollTo(first.segmentID, anchor: UnitPoint(x: 0, y: 0.3))
                 }
             }
-            // A jump from the summary. Unanimated: the face has just
+            // A jump from another tab. Unanimated: the tab has just
             // changed under the reader, and a scroll animating on top of that
             // reads as the page sliding about.
             .onChange(of: jumpRequest) { _, _ in
@@ -1550,7 +1719,7 @@ struct RecordingDetailView: View {
         if isSample {
             if let sample = SampleRecordingStore.shared.meta(for: summary.id) {
                 meta = sample
-                chooseFace(sample)
+                chooseTab(sample)
             } else {
                 error = String(localized: "The sample recording is no longer in the library.")
             }
@@ -1560,7 +1729,7 @@ struct RecordingDetailView: View {
             if ScreenshotDemo.servesFixtures {
                 let demo = ScreenshotDemo.meta(for: summary.id)
                 meta = demo
-                chooseFace(demo)
+                chooseTab(demo)
                 if let ms = ScreenshotDemo.shared.jumpOnOpen {
                     Task { @MainActor in
                         try? await Task.sleep(for: .milliseconds(1200))
@@ -1587,23 +1756,23 @@ struct RecordingDetailView: View {
                 displayTitle = loaded.title
                 onTitleChange?(loaded.title)
             }
-            chooseFace(loaded)
+            chooseTab(loaded)
             evaluateFeedbackPrompts(loaded)
         } catch {
             self.error = error.localizedDescription
         }
     }
 
-    /// The face the recording opens on — once. See `face`.
-    private func chooseFace(_ meta: RecordingMeta) {
+    /// The tab the recording opens on — once. See `tab`.
+    private func chooseTab(_ meta: RecordingMeta) {
         // Every load, not only the first: a reload can bring a suggestion the
         // desktop has just left on the recording.
         Task { @MainActor in presentSuggestion() }
-        guard !faceChosen else { return }
-        faceChosen = true
-        face = meta.hasAnalysis ? .summary : .transcript
+        guard !tabChosen else { return }
+        tabChosen = true
+        tab = Self.rememberedTabs[summary.id] ?? (meta.hasAnalysis ? .summary : .replay)
         #if DEBUG
-            if let forced = ScreenshotDemo.shared.forcedFace { face = forced }
+            if let forced = ScreenshotDemo.shared.forcedTab { tab = forced }
         #endif
     }
 
@@ -1645,45 +1814,20 @@ struct RecordingDetailView: View {
         orgId.map { id in app.orgs.first { $0.id == id }?.name ?? String(localized: "Organization") }
     }
 
-    /// Where the recording is, one tap from moving it: the folder (or Unfiled)
-    /// under the player, with the organization's name in front for an org
-    /// recording. The overflow menu's "Move to folder…" is two taps and hidden
-    /// behind a glyph; re-filing is the thing people come back to a recording
-    /// to do.
-    ///
-    /// An org recording with no folders to move between gets the label without
-    /// the button: its endpoint can only move it within its organization.
-    private var folderChip: some View {
-        let name = currentFolderName ?? String(localized: "Unfiled")
-        let label = orgName.map { "\($0) · \(currentFolderName ?? String(localized: "Not in a folder"))" } ?? name
-        let movable = orgId == nil || !folders.isEmpty
-        return VStack(alignment: .leading, spacing: 2) {
-            Button {
-                choosingFolder = true
-            } label: {
-                HStack(spacing: 5) {
-                    Image(systemName: orgId == nil ? "folder" : "person.2")
-                        .accessibilityHidden(true)
-                    Text(verbatim: label)
-                        .lineLimit(1)
-                    if movable {
-                        Image(systemName: "chevron.down")
-                            .font(.parley.caption2.weight(.semibold))
-                            .accessibilityHidden(true)
-                    }
-                }
-                .font(.parley.footnote)
-                .foregroundStyle(movable ? Theme.primary : Color(.secondaryLabel))
-                .frame(minHeight: 32)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .disabled(!movable)
-            .accessibilityLabel(Text("Folder: \(label)"))
-            .accessibilityHint(movable ? Text("Move to another folder") : Text(verbatim: ""))
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 20)
+    /// Where the recording is filed, and the folder the pass suggests for it.
+    /// See `FilingRow`. An org recording with no folders to move between gets
+    /// no 「變更」: its endpoint can only move it within its organization.
+    private var filingRow: some View {
+        FilingRow(
+            model: filing,
+            folderName: currentFolderName,
+            orgName: orgName,
+            movable: orgId == nil || !folders.isEmpty,
+            offers: orgId == nil,
+            highlighted: rowHighlighted,
+            openPicker: { choosingFolder = true },
+            file: { folder in Task { await filing.file(into: folder, app: app) } },
+            dismiss: { filing.dismiss(app: app) })
     }
 
     /// The same picker the Library uses. A personal recording can also move to
@@ -1705,8 +1849,14 @@ struct RecordingDetailView: View {
     }
 
     /// The picker's confirm. Throws back to the sheet, which stays up with the
-    /// error.
+    /// error. A suggestion still on offer is spent once the recording is filed
+    /// any other way, and is retired with it.
     private func file(to destination: FolderDestination, label: String) async throws {
+        try await move(to: destination, label: label)
+        if currentFolderId != nil || leaveAfterMove { filing.retireAfterFiling(app: app) }
+    }
+
+    private func move(to destination: FolderDestination, label: String) async throws {
         if case .newFolder(let name) = destination {
             // The folder is created in the cloud: it is a real folder, the
             // user named it.
@@ -1787,6 +1937,43 @@ struct RecordingDetailView: View {
         guard let currentFolderId, folders.contains(where: { $0.id == currentFolderId })
         else { return nil }
         return currentFolderId
+    }
+
+    // MARK: renaming and deleting
+
+    /// The header's rename: the meta's title (or the sample's local one),
+    /// through the one write that also retires the filing suggestion's title
+    /// and the 「自動命名」 tag — see `FilingSuggestionModel.rename`.
+    private func rename(_ title: String) async throws {
+        try await FilingSuggestionModel.rename(
+            id: summary.id, to: title, isSample: isSample, cloud: app.cloud)
+        displayTitle = title
+        meta?.title = title
+        onTitleChange?(title)
+        app.noteLibraryChanged()
+    }
+
+    /// Delete the recording everywhere, then go back to the Library — or, for
+    /// the sample, take it out of the Library, which is all its delete has
+    /// ever meant.
+    private func deleteRecording() async {
+        if isSample {
+            SampleRecordingStore.shared.remove()
+            app.noteLibraryChanged()
+            dismissScreen()
+            return
+        }
+        do {
+            try await app.cloud.deleteRecording(id: summary.id)
+            TranscriptHealthCache.forget(summary.id)
+            app.noteLibraryChanged()
+            dismissScreen()
+        } catch let e as CloudError where e.status == 403 {
+            deleteError = String(
+                localized: "Only the uploader or an admin can delete this recording")
+        } catch {
+            deleteError = String(localized: "Delete failed: \(error.localizedDescription)")
+        }
     }
 
     // MARK: feedback

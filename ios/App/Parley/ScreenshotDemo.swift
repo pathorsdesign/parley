@@ -63,10 +63,11 @@
         @Published var endedMeeting: EndedMeeting?
         /// The record screen's meeting in progress is seeded paused.
         var showPausedMeeting = false
-        /// The filing suggestion's Adjust sheet, open. Flipped by
-        /// `seedEndedMeetingFiling` rather than by the route, because the card watches this and cannot
-        /// know which of the two `task`s SwiftUI ran first — set from the route
-        /// it can open onto a model that has not been seeded yet.
+        /// The filing row's 「選其他資料夾…」 picker, open. Flipped by
+        /// `seedEndedMeetingFiling` rather than by the route, because the page
+        /// watches this and cannot know which of its two `task`s SwiftUI ran
+        /// first — set from the route it can open onto a page that has not
+        /// loaded its folders yet.
         @Published var openFilingAdjust = false
         /// The transcript opens the folder picker over `pickerFolders`.
         @Published var openFolderPicker = false
@@ -122,10 +123,10 @@
         /// Which fixture `showTranscript` pushes. The featured one unless a
         /// route asks for the unanalysed one.
         @Published var recordingID = "demo-renewal"
-        /// The face the pushed recording opens on, overriding the "summary when
+        /// The tab the pushed recording opens on, overriding the "summary when
         /// analysed" rule — the store's transcript frame has to stay a
         /// transcript, and the empty summary is only reachable by force.
-        var forcedFace: RecordingDetailView.Face?
+        var forcedTab: ResultTab?
         /// A summary timestamp the pushed recording "taps" once it is up, and
         /// whether the lit turn stays lit so the frame can be taken.
         var jumpOnOpen: UInt64?
@@ -207,7 +208,7 @@
             showVoiceTyping = false
             keyboardHarness = false
             recordingID = Self.featured.id
-            forcedFace = nil
+            forcedTab = nil
             jumpOnOpen = nil
             holdsLitTurn = false
             switch route {
@@ -234,19 +235,29 @@
                 tab = .library
                 showVoiceTyping = true
                 Task { @MainActor in DictationHistory.shared.seedDemo(Self.voiceHistory) }
-            case "transcript":
+            case "transcript", "replay":
+                // 回放: the player, the highlights and the transcript.
                 tab = .library
-                forcedFace = .transcript
+                forcedTab = .replay
                 showTranscript = true
             case "summary":
                 tab = .library
-                forcedFace = .summary
+                forcedTab = .summary
+                showTranscript = true
+            case "actions":
+                // 後續行動, grouped 我們 / 對方, with the brief's next steps.
+                tab = .library
+                forcedTab = .actions
+                showTranscript = true
+            case "notes":
+                tab = .library
+                forcedTab = .notes
                 showTranscript = true
             case "jump":
-                // The summary's first highlight, tapped: the transcript with
-                // that turn lit and the 💡 notes beside it.
+                // A moment in the summary, tapped: 回放 with that turn lit and
+                // the 💡 notes beside it.
                 tab = .library
-                forcedFace = .summary
+                forcedTab = .summary
                 jumpOnOpen = 44_000
                 holdsLitTurn = true
                 showTranscript = true
@@ -280,7 +291,7 @@
             case "nosummary":
                 tab = .library
                 recordingID = "demo-review"
-                forcedFace = .summary
+                forcedTab = .summary
                 showTranscript = true
             case "keyboard":
                 tab = .settings
@@ -297,7 +308,7 @@
             case "settings": tab = .settings
             case "movetofolder":
                 tab = .library
-                forcedFace = .transcript
+                forcedTab = .replay
                 showTranscript = true
                 openFolderPicker = true
             case "resetchecklist":
@@ -521,7 +532,7 @@
                 id: "demo-renewal",
                 title: t("Renewal terms — Northwind", "續約條件討論 — 北風工業"),
                 source: "live", createdAt: epoch, durationMs: 1_122_000,
-                speakerCount: 2, findingsCount: 3, actionItemsCount: 2, hasAudio: true,
+                speakerCount: 2, findingsCount: 3, actionItemsCount: 3, hasAudio: true,
                 snippet: t(
                     "Forty seats against an eighty-seat quote; price held through the next renewal.",
                     "四十席對上八十席的報價；價格鎖到下一次續約。"),
@@ -549,13 +560,15 @@
         static var featured: CloudRecordingSummary { recordings[0] }
 
         /// What the Library lists: the fixtures, with the featured one still
-        /// unfiled while it is the meeting that has just ended (`settled`,
-        /// `adjust`) — a recording that lands with its home still on offer,
-        /// which is the state the filing card is about.
+        /// unfiled and still under its clock name while it is the meeting that
+        /// has just ended (`settled`, `adjust`) — a recording that lands with
+        /// its name about to arrive and its home still on offer, which is the
+        /// state the result page's header is about.
         static var libraryRecordings: [CloudRecordingSummary] {
             guard shared.endedMeeting != nil else { return recordings }
             var list = recordings
             list[0].folderId = nil
+            list[0].title = clockTitle
             return list
         }
 
@@ -675,28 +688,48 @@
             bare.raw["findings"] = [Any]()
             bare.raw["actionItems"] = [Any]()
             bare.raw["brief"] = nil
+            bare.raw["meetingContext"] = nil
             return bare
         }
 
-        /// The analysis's short read, with the moments it cites as links.
+        /// The analysis's short read, with the moments it cites as links — in the
+        /// desktop brief's shape: English `## ` headings the page translates,
+        /// and a "Next steps" section that 後續行動 shows instead of 總結.
         private static var brief: String {
             t(
-                "**Renewal held at forty seats, the enterprise floor.** The client budgeted forty against an eighty-seat quote [0:12]; forty is the minimum, so the lever became a price hold through the next renewal [0:27].\n\n**Next:** onboarding is two weeks because SSO is already on Okta [0:58]. The revised quote goes out tomorrow with the security questionnaire [1:32].",
-                "**續約鎖在四十席，企業版的底線。** 客戶編了四十席、報價是八十席 [0:12]；四十席已是最低門檻，可談的變成把價格鎖到下一次續約 [0:27]。\n\n**接下來：** SSO 已在 Okta 上，導入兩週 [0:58]。修訂報價明天寄出，附資安問卷 [1:32]。")
+                "## Where this landed\nRenewal held at forty seats, the enterprise floor. The client budgeted forty against an eighty-seat quote [0:12]; forty is the minimum, so the lever became a price hold through the next renewal [0:27].\n\n## Their pain and objections\n- Eighty seats is double what finance approved [0:12]\n- Onboarding time decides whether they can go live this quarter [0:44]\n\n## Next steps\n- Send the revised quote with the price hold in writing [1:32]\n- Confirm onboarding is two weeks, since SSO is already on Okta [0:58]",
+                "## Where this landed\n續約鎖在四十席，企業版的底線。客戶編了四十席、報價是八十席 [0:12]；四十席已是最低門檻，可談的變成把價格鎖到下一次續約 [0:27]。\n\n## Their pain and objections\n- 八十席是財務核准的兩倍 [0:12]\n- 導入時間決定這一季能不能上線 [0:44]\n\n## Next steps\n- 寄出含鎖價條款的修訂報價 [1:32]\n- SSO 已在 Okta 上，確認導入兩週 [0:58]")
+        }
+
+        /// What the desktop synced as the meeting's context: the background
+        /// prepared before it, then the notes typed during it under the
+        /// desktop's heading — so 筆記 and 會議背景 both have something to show.
+        private static var meetingContext: String {
+            t(
+                "Northwind renewal. Their budget is forty seats; last year they churned a pilot over onboarding time.\n\nNotes taken during the meeting:\n- Forty seats is firm on their side\n- Ask for the price hold in writing\n- Okta confirmed [0:58]",
+                "北風工業續約。對方預算是四十席；去年有一個試用因為導入太久而流失。\n\n會議中的筆記：\n- 四十席是對方的底線\n- 鎖價要寫進報價\n- 已確認在 Okta 上 [0:58]")
         }
 
         private static var actionItems: [[String: Any]] {
             [
                 [
-                    "id": "a-quote", "done": false, "atMs": 92_000.0,
+                    "id": "a-quote", "done": false, "atMs": 92_000.0, "side": "us",
+                    "owner": t("You", "我"),
                     "text": t(
                         "Send the revised quote with the price hold in writing",
                         "寄出含鎖價條款的修訂報價"),
                 ],
                 [
-                    "id": "a-security", "done": false, "atMs": 92_000.0,
+                    "id": "a-security", "done": false, "atMs": 92_000.0, "side": "us",
                     "text": t(
                         "Attach the security questionnaire", "附上資安問卷"),
+                ],
+                [
+                    "id": "a-finance", "done": false, "atMs": 76_000.0, "side": "them",
+                    "owner": t("Client lead", "客戶窗口"),
+                    "text": t(
+                        "Take the revised quote to finance on Thursday",
+                        "週四把修訂報價交給財務"),
                 ],
             ]
         }
@@ -720,6 +753,7 @@
                     "mix-2": t("You", "我"),
                 ],
                 "findings": findings, "actionItems": actionItems, "brief": brief,
+                "meetingContext": meetingContext,
                 "audio": "audio.ogg", "analyzed": true,
             ])
         }
@@ -771,33 +805,32 @@
             seedLive(recorder)
         }
 
-        /// The meeting that has just landed: named on the live screen while it
-        /// recorded (`seedLive`'s title) but left without a folder, every turn
-        /// final.
+        /// The meeting that has just landed under its clock name, without a
+        /// folder, every turn final — so the filing pass has both halves to
+        /// answer: the name it applies, the folder it suggests.
         private static var endedMeetingFixture: EndedMeeting {
             EndedMeeting(
                 settled: MeetingRecorder.Settled(
-                    id: featured.id, title: featured.title, folderId: nil,
+                    id: featured.id, title: clockTitle, folderId: nil,
                     segments: lines.map { line in
                         TranscriptSegment(
                             id: "mix-\(line.ms)", source: "mix", speaker: line.speaker,
                             text: line.text, isFinal: true,
                             startMs: line.ms, endMs: line.ms + 12_000)
                     },
-                    named: true, filed: false),
+                    named: false, filed: false),
                 finished: nil)
         }
 
-        /// The result page's filing card for the ended meeting, seeded straight
-        /// into its model rather than through the pass, which would need the
-        /// network the demo exists to avoid. Named live, so the card opens on
-        /// that name — no rename on offer, no "Was:" — with the folders to
-        /// confirm.
+        /// The result page's filing pass for the ended meeting, seeded straight
+        /// into its model rather than run, which would need the network the
+        /// demo exists to avoid: the folders on offer at once, and the name a
+        /// beat later — so the frame catches the header's 「自動命名」 tag
+        /// arriving.
         static func seedEndedMeetingFiling(_ filing: FilingSuggestionModel) {
             filing.seedDemo(
-                suggestion: filingSuggestion.answering(named: true, filed: false)
-                    ?? filingSuggestion,
-                currentTitle: featured.title, folders: folders)
+                suggestion: filingSuggestion, currentTitle: clockTitle, folders: folders,
+                namedAs: filingSuggestion.title, recordingId: featured.id)
             guard shared.wantsFilingAdjust else { return }
             // A beat for the push and the card to be on screen: the card opens
             // its sheet on this flag changing, and cannot see a change made

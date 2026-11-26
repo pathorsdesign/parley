@@ -51,7 +51,7 @@ extension FeedbackPromptTicket {
 /// second action, and a way to close it.
 ///
 /// No fill. The app's reading screens carry no tinted cards (see
-/// `FilingSuggestionCard`), and a prompt that is about a failure should not be
+/// `FilingRow`), and a prompt that is about a failure should not be
 /// louder than the failure's own explanation — a hairline frame is enough to
 /// say "this is a separate thing from the transcript".
 struct FeedbackPromptCard: View {

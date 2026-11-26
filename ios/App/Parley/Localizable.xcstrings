@@ -19,6 +19,23 @@
         }
       }
     },
+    "%@ (them)" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ (them)"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@（對方）"
+          }
+        }
+      }
+    },
     "%lld d ago" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -49,6 +66,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%lld 小時前"
+          }
+        }
+      }
+    },
+    "%lld items" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld items"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 件"
           }
         }
       }
@@ -889,6 +923,23 @@
         }
       }
     },
+    "Auto-named" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Auto-named"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自動命名"
+          }
+        }
+      }
+    },
     "Back" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1026,6 +1077,23 @@
         }
       }
     },
+    "Change" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Change"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "變更"
+          }
+        }
+      }
+    },
     "Checking your organizations…" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1077,13 +1145,13 @@
         }
       }
     },
-    "Choose another…" : {
+    "Choose another folder…" : {
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Choose another…"
+            "value" : "Choose another folder…"
           }
         },
         "zh-Hant" : {
@@ -1417,6 +1485,74 @@
         }
       }
     },
+    "Copy Actions" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Copy Actions"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "複製後續行動"
+          }
+        }
+      }
+    },
+    "Copy Background" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Copy Background"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "複製會議背景"
+          }
+        }
+      }
+    },
+    "Copy Notes" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Copy Notes"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "複製筆記"
+          }
+        }
+      }
+    },
+    "Copy Summary" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Copy Summary"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "複製總結"
+          }
+        }
+      }
+    },
     "Copy instead" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1430,23 +1566,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "先複製"
-          }
-        }
-      }
-    },
-    "Copy to organization" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Copy to organization"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "副本到組織"
           }
         }
       }
@@ -1468,19 +1587,19 @@
         }
       }
     },
-    "Copy with analysis prompt" : {
+    "Copy transcript with analysis prompt" : {
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Copy with analysis prompt"
+            "value" : "Copy transcript with analysis prompt"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "複製（附分析提示）"
+            "value" : "複製逐字稿（附分析提示）"
           }
         }
       }
@@ -1770,6 +1889,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "深色"
+          }
+        }
+      }
+    },
+    "Decisions" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Decisions"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "決議"
           }
         }
       }
@@ -2080,6 +2216,23 @@
         }
       }
     },
+    "Do better" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Do better"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "可以更好"
+          }
+        }
+      }
+    },
     "Do one lap, five minutes" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -2233,6 +2386,23 @@
         }
       }
     },
+    "Downloading… %lld%%" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Downloading… %lld%%"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "下載中… %lld%%"
+          }
+        }
+      }
+    },
     "Edit saved info" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -2246,23 +2416,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "編輯常用資訊"
-          }
-        }
-      }
-    },
-    "Edit the title" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Edit the title"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "編輯標題"
           }
         }
       }
@@ -2352,19 +2505,19 @@
         }
       }
     },
-    "Every recording gets a name and a suggested folder when it's done. You can change the title or pick your own folder, then tap Save." : {
+    "Every recording gets a name and a suggested folder. Tap the name to change it, or pick your own folder. Try any suggested folder above." : {
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Every recording gets a name and a suggested folder when it's done. You can change the title or pick your own folder, then tap Save."
+            "value" : "Every recording gets a name and a suggested folder. Tap the name to change it, or pick your own folder. Try any suggested folder above."
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "錄完的會議會自動取名、建議放哪個資料夾。標題可以改，資料夾也能自己選，選好再按「儲存」。"
+            "value" : "錄完的會議會自動取名，也會建議放哪個資料夾。標題點一下就能改，資料夾也能自己選。點上面任一個建議的資料夾試試。"
           }
         }
       }
@@ -2420,23 +2573,6 @@
         }
       }
     },
-    "Existing folder" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Existing folder"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "既有資料夾"
-          }
-        }
-      }
-    },
     "FAQ" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -2471,6 +2607,23 @@
         }
       }
     },
+    "Fell short" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fell short"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "沒做到的"
+          }
+        }
+      }
+    },
     "File" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -2484,6 +2637,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "歸檔"
+          }
+        }
+      }
+    },
+    "File under" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "File under"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "建議放進"
           }
         }
       }
@@ -2624,19 +2794,19 @@
         }
       }
     },
-    "Folder: %@" : {
+    "For the next meeting" : {
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Folder: %@"
+            "value" : "For the next meeting"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "資料夾：%@"
+            "value" : "下次會議可以談"
           }
         }
       }
@@ -2726,23 +2896,6 @@
         }
       }
     },
-    "Go to %@ in the transcript" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Go to %@ in the transcript"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "到逐字稿的 %@"
-          }
-        }
-      }
-    },
     "Grant" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -2756,6 +2909,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "授權"
+          }
+        }
+      }
+    },
+    "Hand it to your AI" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hand it to your AI"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "交給你的 AI"
           }
         }
       }
@@ -2845,19 +3015,19 @@
         }
       }
     },
-    "Highlights %lld" : {
+    "Highlights" : {
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Highlights %lld"
+            "value" : "Highlights"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "重點 %lld"
+            "value" : "重點"
           }
         }
       }
@@ -3282,6 +3452,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "錄音會保存在手機上，直到上傳成功或你刪除它。"
+          }
+        }
+      }
+    },
+    "Key moments" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Key moments"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "關鍵時刻"
           }
         }
       }
@@ -4034,23 +4221,6 @@
         }
       }
     },
-    "Move to another folder" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Move to another folder"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "移到其他資料夾"
-          }
-        }
-      }
-    },
     "Move to folder" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -4153,6 +4323,23 @@
         }
       }
     },
+    "Moving it forward" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Moving it forward"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "推進下一步"
+          }
+        }
+      }
+    },
     "Named and filed" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -4200,6 +4387,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "新資料夾"
+          }
+        }
+      }
+    },
+    "New folder “%@”" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "New folder “%@”"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "新增「%@」"
           }
         }
       }
@@ -4268,6 +4472,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "下一個結果"
+          }
+        }
+      }
+    },
+    "No action items." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No action items."
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "沒有後續行動項目。"
           }
         }
       }
@@ -4374,6 +4595,23 @@
         }
       }
     },
+    "Not filed yet" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Not filed yet"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "還沒歸檔"
+          }
+        }
+      }
+    },
     "Not in a folder" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -4476,6 +4714,23 @@
         }
       }
     },
+    "Notes you took in the floating window during the meeting" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Notes you took in the floating window during the meeting"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "會議中在浮動視窗記的筆記"
+          }
+        }
+      }
+    },
     "Nothing is being recorded or transcribed." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -4556,6 +4811,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "沒有輸入任何文字。要重來就再按一次麥克風。"
+          }
+        }
+      }
+    },
+    "OK" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OK"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "好"
           }
         }
       }
@@ -4697,19 +4969,36 @@
         }
       }
     },
-    "Open the transcript" : {
+    "Open questions" : {
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Open the transcript"
+            "value" : "Open questions"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "開逐字稿"
+            "value" : "待解問題"
+          }
+        }
+      }
+    },
+    "Open replay" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open replay"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "開回放"
           }
         }
       }
@@ -4944,6 +5233,23 @@
         }
       }
     },
+    "Outcome" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Outcome"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "結果"
+          }
+        }
+      }
+    },
     "Owner" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -4957,6 +5263,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "擁有者"
+          }
+        }
+      }
+    },
+    "Pain & objections" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pain & objections"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "對方痛點與疑慮"
           }
         }
       }
@@ -5093,6 +5416,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Parley 鍵盤"
+          }
+        }
+      }
+    },
+    "Parley named this from the conversation. Tap the title to change it." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Parley named this from the conversation. Tap the title to change it."
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Parley 依對話內容取的名字，點標題就能改"
           }
         }
       }
@@ -5302,6 +5642,23 @@
         }
       }
     },
+    "Play from %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Play from %@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "從 %@ 播放"
+          }
+        }
+      }
+    },
     "Play from this step" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -5456,6 +5813,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "已潤飾 · 精簡"
+          }
+        }
+      }
+    },
+    "Prepared before the meeting; the AI reads it with the transcript" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Prepared before the meeting; the AI reads it with the transcript"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "會議前準備的背景，AI 分析時會一起讀"
           }
         }
       }
@@ -6042,6 +6416,23 @@
         }
       }
     },
+    "Rename failed: %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rename failed: %@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "重新命名失敗：%@"
+          }
+        }
+      }
+    },
     "Rename folder" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -6055,23 +6446,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "重新命名資料夾"
-          }
-        }
-      }
-    },
-    "Renamed" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Renamed"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "已改名"
           }
         }
       }
@@ -6789,23 +7163,6 @@
         }
       }
     },
-    "Share or copy transcript" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Share or copy transcript"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "分享或複製逐字稿"
-          }
-        }
-      }
-    },
     "Share to AI" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -6819,23 +7176,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "分享給 AI"
-          }
-        }
-      }
-    },
-    "Share to AI (with analysis prompt)" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Share to AI (with analysis prompt)"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "分享給 AI（附分析提示）"
           }
         }
       }
@@ -7233,23 +7573,6 @@
         }
       }
     },
-    "Skip suggestion" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Skip suggestion"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "不用建議"
-          }
-        }
-      }
-    },
     "Something else" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -7297,23 +7620,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "講者 %@"
-          }
-        }
-      }
-    },
-    "Speakers" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Speakers"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "講者"
           }
         }
       }
@@ -7540,6 +7846,23 @@
         }
       }
     },
+    "Still unknown" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Still unknown"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "還不知道的事"
+          }
+        }
+      }
+    },
     "Stop recording" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -7564,23 +7887,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Suggested"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "建議"
-          }
-        }
-      }
-    },
-    "Suggestion" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Suggestion"
           }
         },
         "zh-Hant" : {
@@ -7839,6 +8145,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "在 Parley 鍵盤上點麥克風，說的話就會打進游標處。"
+          }
+        }
+      }
+    },
+    "Tap to rename" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tap to rename"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "點一下可以改標題"
           }
         }
       }
@@ -8299,6 +8622,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "整段錄音會從頭重新轉錄一次，新的逐字稿回來後會取代你現在看到的這一份。這會用掉帳戶的轉錄時數，和錄一場新會議一樣。"
+          }
+        }
+      }
+    },
+    "Them" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Them"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "對方"
           }
         }
       }
@@ -8813,6 +9153,23 @@
         }
       }
     },
+    "Us" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Us"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "我們"
+          }
+        }
+      }
+    },
     "Usage (this period)" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -8911,23 +9268,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "版本"
-          }
-        }
-      }
-    },
-    "View" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "View"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "檢視"
           }
         }
       }
@@ -9081,23 +9421,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "用範例錄音走一遍"
-          }
-        }
-      }
-    },
-    "Was: %@" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Was: %@"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "原本：%@"
           }
         }
       }
@@ -9268,6 +9591,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "聽寫完馬上改字，Parley 會記下來。同一個改法看到兩次才會真的採用，這樣臨時改個念頭就不會變成規則。往左滑掉某一列就是叫它忘掉。"
+          }
+        }
+      }
+    },
+    "Where it landed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Where it landed"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "目前進度"
           }
         }
       }
@@ -9760,6 +10100,108 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "or"
+          }
+        }
+      }
+    },
+    "result.filing.notNow" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Not now"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "先不歸檔"
+          }
+        }
+      }
+    },
+    "result.tab.actions" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Actions"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "後續行動"
+          }
+        }
+      }
+    },
+    "result.tab.context" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Background"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "會議背景"
+          }
+        }
+      }
+    },
+    "result.tab.notes" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Notes"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "筆記"
+          }
+        }
+      }
+    },
+    "result.tab.replay" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Replay"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "回放"
+          }
+        }
+      }
+    },
+    "result.tab.summary" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Summary"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "總結"
           }
         }
       }

@@ -1,5 +1,7 @@
 # iOS recording page — Summary | Transcript
 
+> **Superseded (2026-11, `ios-result-redesign`).** The page now follows the desktop's report: a header with the recording's name (renamed in place, with an 「自動命名」 tag while the filing pass's name is fresh), the filing row (filed / folder suggested / not filed), and the tabs 總結 · 後續行動 · 筆記 · 會議背景 · 回放. The player, highlights and transcript live on 回放; every timestamp jumps there. The filing pass applies the title by itself and only suggests the folder. See `RecordingDetailView`, `RecordingHeader.swift` and `RecordingResultPages.swift`. The decisions below describe the earlier two-face page.
+
 - **Status**: Approved, implemented on `ob/w9`
 - **Date**: 2026-09-27, iOS 1.20
 - **One line**: a recording opens as two faces under one pinned player — what the meeting came to, and what was said — instead of one scroll that mixed the two.

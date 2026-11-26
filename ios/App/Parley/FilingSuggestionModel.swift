@@ -2,73 +2,55 @@ import Foundation
 import ParleyKit
 import SwiftUI
 
-/// The post-transcription filing suggestion for the recording that just
-/// finished: what it should be CALLED, and where it should LIVE.
+/// The post-transcription filing pass for one recording, as its result page
+/// shows it: the **name**, applied on its own, and the **folder**, suggested.
 ///
-/// The phone names every recording after the clock — "Meeting Sep 7, 3:20 PM" —
-/// and offered no way to change it, so a library of rows nobody can tell apart
-/// was a dead end rather than an annoyance. Neither answer can be produced any
-/// earlier than this: a name worth having needs a transcript to read, and the
-/// right folder needs somebody to know what the meeting was about. So the offer
-/// arrives at the end of the recording, at the top of its result page — where
-/// ending a meeting now lands, as the desktop's End lands on the report.
+/// The phone names every recording after the clock — "Meeting Sep 7, 3:20 PM"
+/// — and a library of rows nobody can tell apart is a dead end rather than an
+/// annoyance. Neither answer can come any earlier than this: a name worth
+/// having needs a transcript to read, and the right folder needs somebody to
+/// know what the meeting was about.
+///
+/// ## The title is applied, the folder is offered
+///
+/// The same split as the desktop (`lib/analysis/filingRun.ts`). A recording
+/// called after the clock helps nobody, and the name is trivially changed back
+/// — tap it in the page header — so the pass's title is written straight away
+/// and flagged as Parley's (`AutoNamedTitles`, the header's 「自動命名」 tag)
+/// until anyone renames it. The folder is a different kind of answer: filing a
+/// meeting under the wrong customer is a mistake the user would have to notice
+/// to undo, so it stays a suggestion — the page header's filing row
+/// (`FilingRow`), one tap per folder.
+///
+/// A name the user gave the meeting while it was recording (`Settled.named`)
+/// is never written over: the pass is told, and proposes no title at all.
 ///
 /// It waits for the UPLOAD to settle, not for the microphone to stop. A rename
-/// or a re-file is a write against a recording the server has to already hold;
-/// running the pass on a recording that has not landed yet would produce an
-/// answer with nothing to apply it to.
+/// or a re-file is a write against a recording the server has to already hold.
 ///
 /// Every part of it is best-effort. A failed folder listing, a failed pass, a
 /// failed push: each leaves the recording exactly as the upload left it, and
-/// only a write the user explicitly asked for ever says so. Finishing a meeting
-/// must not get worse because this feature exists.
+/// only a write the user explicitly asked for (a chip) ever says so.
 ///
-/// ## An answered offer is retired, not compared away
-///
-/// Both halves used to be derived purely by comparison against what the
-/// recording currently is, and neither comparison can express "the user has
-/// already answered this".
-///
-/// `proposedTitle` compared the suggestion against `currentTitle` and retired
-/// itself when they matched, which is only an answer for the user who takes the
-/// proposed name verbatim. Someone who answers with a THIRD string — their own,
-/// typed in the Adjust sheet — leaves the two names unequal forever, so the
-/// block redrew with the model's name over the top of the one they had just
-/// saved, and offered to write it for them.
-///
-/// `proposedFolders` drops the chip pointing at the folder the recording is
-/// already in, which retires the accepted candidate and nothing else. The
-/// runners-up the pass also proposed outlive the accept, so the block redrew as
-/// a bare folder line for a question already answered — and a candidate with no
-/// id, meaning "create a folder called X", is deliberately not compared away at
-/// all, because `nil` is also "the personal root". Accepting a new folder left
-/// that same candidate on offer, and a second `Save as suggested` created a
-/// SECOND folder under the same name.
-///
-/// So each half records what the user did — `titleAnswered`, `folderAnswered` —
-/// instead of inferring it from what the recording ended up being. Both are set
-/// by `apply`, which every accept route goes through, and only once its push
-/// has returned: a write that threw leaves the offer open, because it is still
-/// worth taking. `forget()` clears them with the rest of the offer, because the
-/// next recording gets its own to answer.
-///
-/// ## Two ways in, two kinds of recording
+/// ## Two ways in
 ///
 /// A result page opened because its meeting just ended asks for the pass
-/// (`consider`) for the recording that just landed — joining the one the
-/// upload already started (`FilingPass`), which persists its answer into the
-/// meta before handing it over. Opened any other way, the page shows a
-/// suggestion that is already *pending* on the recording (`present`): any pass — this phone's on an import or a queued
-/// upload, or the desktop's — leaves one in the synced meta's
-/// `filingSuggestion`, and the bundled sample ships with one. The
-/// writes differ only in where they land — `Target` — and both answer the
-/// offer the same way: a cloud recording's meta gets `filingSuggestion: null`
-/// and `filingSuggested: true` (the desktop's "resolved"), the sample's local
-/// entry gets `suggestionPending = false`.
+/// (`consider`) — joining the one the upload already started (`FilingPass`),
+/// which persists its answer into the meta. Opened any other way, the page
+/// shows a suggestion already *pending* on the recording (`present`): any pass
+/// — this phone's on an import or a queued upload, or the desktop's — leaves
+/// one in the synced meta's `filingSuggestion`, and the bundled sample ships
+/// with one. A pending suggestion that still carries a title is a pass whose
+/// name nobody has applied yet, so `present` applies it too.
+///
+/// The writes differ only in where they land — `Target` — and both answer the
+/// folder half the same way: a cloud recording's meta gets
+/// `filingSuggestion: null` and `filingSuggested: true` (the desktop's
+/// "resolved"), the sample's local entry gets `suggestionPending = false`.
 @MainActor
 final class FilingSuggestionModel: ObservableObject {
 
-    /// Where an accepted suggestion is written.
+    /// Where an answer is written.
     enum Target: Equatable {
         /// A personal cloud recording: one read-modify-write of its meta.
         case cloud(id: String)
@@ -78,117 +60,61 @@ final class FilingSuggestionModel: ObservableObject {
         case sample
     }
 
+    /// The folder half still on offer. Never carries a title: the title is
+    /// applied, not offered (see the type doc).
     @Published private(set) var suggestion: FilingSuggestion?
-    /// What the recording carries in the cloud right now. Written by the pass
-    /// from the upload's own outcome, then by each accepted push — this is the
-    /// live state the block is derived against.
+    /// What the recording is called and where it is filed right now, as the
+    /// pass and every write since have left it.
     @Published private(set) var currentTitle = ""
     @Published private(set) var currentFolderId: String?
-    /// The folders the user already has, as the pass listed them. Kept so the
-    /// Adjust sheet can offer them without a second `listFolders()` — the pass
-    /// has to fetch the registry anyway to give the model a menu to choose
-    /// from, and a sheet that fetched it again would show a different list on a
-    /// flaky network than the one the suggestion was made against.
+    /// The folders the user already has, as the pass listed them.
     @Published private(set) var existingFolders: [CloudFolder] = []
-    /// A push is in flight. One at a time, and not one flag per action: every
-    /// accept read-modify-writes the same meta, so two together let the slower
-    /// one push a copy it read before the faster one landed — silently undoing
-    /// it.
+    /// A push is in flight. One at a time: every write read-modify-writes the
+    /// same meta, so two together let the slower one push a copy it read
+    /// before the faster one landed — silently undoing it.
     @Published private(set) var isWriting = false
-    /// A push the user asked for did not land. Deliberately not raised for the
-    /// pass itself: nobody asked for that one, so its failure is silence.
+    /// A push the user asked for did not land. Never raised for the title the
+    /// pass applies by itself: nobody asked for that one, so its failure is
+    /// silence.
     @Published private(set) var writeFailed = false
 
     /// Where the visible suggestion's answer is written. nil = nothing on offer.
     private var target: Target?
     /// Told after each write that landed: the new title (if it changed), where
-    /// the recording is now filed (if that changed; an org copy does not move
-    /// it), and a folder created for it (if one was). The recording screen keeps its title, its folder and its folder
-    /// list in step with this.
+    /// the recording is now filed (if that changed), and a folder created for
+    /// it (if one was). The page keeps its header and folder list in step.
     var onApplied: ((_ title: String?, _ filed: FolderDestination?, _ created: CloudFolder?) -> Void)?
-    /// Told once the offer is fully answered — accepted in full, or skipped —
-    /// so a screen that presented it from the recording's own data stops
-    /// presenting it.
+    /// Told once the folder offer is answered — filed, or skipped — so a page
+    /// that presented it from the recording's own data stops presenting it.
     var onRetired: (() -> Void)?
-    /// The recording the pass has already been spent on. Kept separately from
-    /// `target`, and NOT cleared by `forget()`: a dismissed card must stay
-    /// dismissed, and the page's `task` runs again every time it reappears.
+    /// The recording the pass has already been spent on. Not cleared by
+    /// `forget()`: a dismissed offer stays dismissed, and the page's `task`
+    /// runs again every time it reappears.
     private var consideredId: String?
-    /// The user has answered the name half of this offer — with the proposed
-    /// name or with one of their own, it makes no difference. Set by `apply`,
-    /// which every accept route goes through, and cleared by `forget()` with
-    /// the rest of the offer.
-    private var titleAnswered = false
-    /// The user has answered the home half of this offer — by taking the
-    /// proposed folder, by picking a different one in the Adjust sheet, or by
-    /// having a new one created for them. Set by `apply` alongside its twin,
-    /// and cleared by `forget()` with the rest of the offer.
+    /// The user has said where this recording lives. Recorded rather than
+    /// compared away: a new-folder candidate has no id to compare against,
+    /// and a second tap on it must not create a second folder.
     private var folderAnswered = false
+    /// The pass's title being written, while it is.
+    private var namingTask: Task<Void, Never>?
     private var pass: Task<Void, Never>?
 
     // MARK: what is left to offer
 
-    /// The proposed name, or nil when there is nothing left to propose — an
-    /// offer the user has already answered, an empty suggestion (the model had
-    /// nothing better), or a recording that is already called that.
-    var proposedTitle: String? {
-        guard !titleAnswered else { return nil }
-        guard let suggestion else { return nil }
-        let proposed = suggestion.title.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !proposed.isEmpty else { return nil }
-        guard proposed != currentTitle.trimmingCharacters(in: .whitespacesAndNewlines) else {
-            return nil
-        }
-        return proposed
-    }
-
-    /// The folders still worth offering, or none at all once the user has said
-    /// where this recording lives — every candidate goes, runners-up included,
-    /// because they were alternative answers to a question that now has one.
-    ///
-    /// The comparison below still runs, for the recording that is already in a
-    /// proposed folder before anyone has answered anything: the chip pointing at
-    /// the folder it is in is dropped, but a `nil` id is compared out explicitly
-    /// rather than by equality, because `nil` is also "the personal root", and
-    /// an unfiled recording is exactly the case a brand-new folder gets proposed
-    /// for. What that same `nil` cannot do is retire itself once accepted —
-    /// which is `folderAnswered`'s job, and why creating the folder twice is no
-    /// longer a double tap away.
+    /// The folders still worth offering — none once the user has answered.
+    /// The chip pointing at the folder the recording is already in is
+    /// dropped; a `nil` id is compared out explicitly rather than by equality,
+    /// because `nil` is also "the personal root", and an unfiled recording is
+    /// exactly the case a brand-new folder gets proposed for.
     var proposedFolders: [FilingFolderSuggestion] {
-        guard !folderAnswered else { return [] }
-        guard let suggestion else { return [] }
+        guard !folderAnswered, let suggestion else { return [] }
         let live = suggestion.folders.filter { folder in
             folder.folderId == nil || folder.folderId != currentFolderId
         }
         return Array(live.prefix(3))
     }
 
-    /// The block draws nothing once neither half is still on offer. Asking the
-    /// two halves is the whole test now that both can retire themselves: each
-    /// already answers nil for a suggestion that never arrived, so a separate
-    /// `suggestion != nil` would only be a second place for the rule to live.
-    var hasSomethingToOffer: Bool {
-        proposedTitle != nil || !proposedFolders.isEmpty
-    }
-
-    /// The folder the one-tap accept files into: the model's best answer, which
-    /// is the only one the block shows. The rest are in the Adjust sheet.
-    var proposedFolder: FilingFolderSuggestion? { proposedFolders.first }
-
-    /// What the title field starts with: the proposed name while it is still on
-    /// offer, the recording's own once it has been answered.
-    var editableTitle: String { proposedTitle ?? currentTitle }
-
-    /// Whether an organization's folder can be offered: only a recording the
-    /// server holds can be shared there, so never the sample.
-    var canShareToOrganizations: Bool {
-        if case .cloud = target { return true }
-        return false
-    }
-
-    /// Whether the name half has been answered, so the card can say "renamed"
-    /// instead of offering it again.
-    var titleWasAnswered: Bool { titleAnswered }
+    var hasSomethingToOffer: Bool { !proposedFolders.isEmpty }
 
     /// Identity for a candidate folder. A folder that does not exist yet has no
     /// id, so it is keyed by the name it would be created under.
@@ -203,8 +129,7 @@ final class FilingSuggestionModel: ObservableObject {
     /// the pass.
     ///
     /// The work is owned by this object rather than by the view's `task`, so
-    /// switching tabs mid-pass does not cancel it and land the user back on a
-    /// screen with nothing to show.
+    /// switching tabs mid-pass does not cancel it.
     func consider(_ settled: MeetingRecorder.Settled, app: AppState) {
         guard consideredId != settled.id else { return }
         consideredId = settled.id
@@ -213,22 +138,18 @@ final class FilingSuggestionModel: ObservableObject {
         }
     }
 
-    /// Drop the suggestion without writing anything. Used by the routes that
-    /// have finished with the offer AFTER their own write landed (`dismiss`,
-    /// the Adjust sheet's Save).
-    ///
-    /// It clears `target`, so a write ordered after this one is a no-op:
-    /// retire the offer once the push it was answered with has returned, never
-    /// before.
+    /// Drop the offer without writing anything. Clears `target`, so a write
+    /// ordered after this one is a no-op.
     func forget() {
         pass?.cancel()
         pass = nil
+        namingTask?.cancel()
+        namingTask = nil
         suggestion = nil
         target = nil
         currentTitle = ""
         currentFolderId = nil
         existingFolders = []
-        titleAnswered = false
         folderAnswered = false
         isWriting = false
         writeFailed = false
@@ -236,188 +157,160 @@ final class FilingSuggestionModel: ObservableObject {
 
     private func run(_ settled: MeetingRecorder.Settled, app: AppState) async {
         guard app.signedIn else { return }
-        // Skip a recording that was auto-shared to an organization. The copy
-        // the user will actually open is the org one, and the phone has no org
-        // rename endpoint at all — a read-only org replay can be neither
-        // renamed nor re-filed, so the suggestion would be spent on something
-        // nobody can act on. The desktop skips the same case for the same
-        // reason.
+        // An auto-shared organization copy is the one the user will open, and
+        // the phone can neither rename nor re-file it. The desktop skips the
+        // same case for the same reason.
         guard !settled.sharedToOrg else { return }
-        // Named and filed on the live screen while it recorded: the question
-        // this card asks has already been answered, and the recording was
-        // saved that way.
+        // Named and filed while it recorded: nothing left to answer.
         guard !(settled.named && settled.filed) else { return }
-
-        // Only what was actually said. A recording that produced no final
-        // transcript has nothing for the pass to read, and asking anyway spends
-        // quota to be told so.
+        // Only what was actually said. A recording with no final transcript has
+        // nothing for the pass to read.
         let spoken = settled.segments.filter { segment in
             segment.isFinal
                 && !segment.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }
         guard !spoken.isEmpty else { return }
 
-        // The pass itself is shared with the upload queue (`FilingPass`):
-        // the upload that landed this recording has usually started it
-        // already, and asking again joins that pass rather than spending a
-        // second one. It reads the transcript, the speaker names and the
-        // meeting context off the recording's own meta, and writes its
-        // answer back into that meta before returning — so the suggestion
-        // survives this screen, and the desktop finds the pass already
-        // spent instead of running its own.
-        //
-        // A half the user answered while recording — the name they typed,
-        // the folder they picked — is left out, so the card opens on their
-        // own name (no "Was:") or offers no folders, and only asks what is
-        // still open.
+        // Shared with the upload queue (`FilingPass`): the upload that landed
+        // this recording has usually started it already, and asking again
+        // joins that pass. A half the user answered while recording is left
+        // out, so a typed name is never proposed over.
         async let proposal = FilingPass.shared.run(
             id: settled.id, cloud: app.cloud, named: settled.named, filed: settled.filed)
-        // Personal folders only: the chips move the recording, and an org
-        // folder is a shared copy instead. The picker adds the organizations'
-        // folders under their own headings. Not worth losing the card over
-        // — the pass lists them itself.
+        // Personal folders only: a chip moves the recording, and an org folder
+        // is a shared copy instead — the picker offers those.
         let folders = ((try? await app.cloud.listFolders()) ?? []).filter { $0.orgId == nil }
-        // Best-effort by design: nil is every failure as well as "nothing
-        // to offer", and the recording is already safely in the cloud
-        // under its clock name either way.
         guard let proposal = await proposal else { return }
-        // A dismiss cancels the pass through `forget()`. Nothing after an
-        // await is guaranteed to still be wanted, and a card that reappeared
-        // after the user said no would be asking a question already answered.
         guard !Task.isCancelled else { return }
         target = .cloud(id: settled.id)
         currentTitle = settled.title
         currentFolderId = settled.folderId
         existingFolders = folders
         writeFailed = false
-        suggestion = proposal
+        show(proposal, app: app)
     }
 
     // MARK: a suggestion that is already pending
 
-    /// Offer a suggestion the recording already carries — the recording
-    /// screen's route in. Safe to call again with a fuller folder list (the
-    /// folders arrive after the meta): an offer the user has started to answer
-    /// is left alone.
+    /// Offer a suggestion the recording already carries. Safe to call again
+    /// with a fuller folder list (the folders arrive after the meta): an offer
+    /// the user has answered is left alone.
     func present(
         _ suggestion: FilingSuggestion, currentTitle: String, currentFolderId: String?,
-        folders: [CloudFolder], target: Target
+        folders: [CloudFolder], target: Target, app: AppState
     ) {
-        guard !isWriting, !titleAnswered, !folderAnswered else { return }
+        guard !isWriting, !folderAnswered else { return }
         self.target = target
-        self.suggestion = suggestion
         self.currentTitle = currentTitle
         self.currentFolderId = currentFolderId
         existingFolders = folders
         writeFailed = false
+        show(suggestion, app: app)
     }
 
-    // MARK: accepting
-
-    /// Where a proposed folder would file the recording: the folder itself, or
-    /// one to create under that name.
-    static func destination(for folder: FilingFolderSuggestion) -> FolderDestination {
-        folder.folderId.map { .folder(id: $0, orgId: nil) } ?? .newFolder(name: folder.name)
-    }
-
-    /// Rename the recording and file it, either or both. `nil` means "leave
-    /// that one as it is"; a title that matches what the recording is already
-    /// called, or a folder it is already in, is dropped the same way.
-    ///
-    /// An organization destination is a shared COPY (`shareRecording`), made
-    /// after the rename has landed so the copy carries the new name. The
-    /// personal original keeps its folder, the desktop's rule for org
-    /// destinations. Only a cloud recording can go there: the sample is not on
-    /// the server to copy.
-    ///
-    /// ONE read-modify-write for both, rather than a rename followed by a move:
-    /// the two would each read the meta and push it back, and the second push
-    /// would carry a copy read before the first landed — undoing it. That is
-    /// also why this is the only accept path, and why the Adjust sheet hands
-    /// its two edits over together instead of applying them one at a time.
-    ///
-    /// A folder that does not exist yet is created HERE and nowhere earlier.
-    /// Merely offering a candidate must not bring it into being — the user
-    /// would end up with an empty folder for every candidate the pass ever
-    /// proposed and never accepted.
-    ///
-    /// - Returns: whether a push landed. The Adjust sheet needs to tell a Save
-    ///   that wrote — and so carried `filingSuggested` with it — apart from a
-    ///   Save that found nothing to change.
-    @discardableResult
-    func apply(title: String?, destination: FolderDestination?, app: AppState) async -> Bool {
-        guard !isWriting, let target else { return false }
-        var newTitle = title?.trimmingCharacters(in: .whitespacesAndNewlines)
-        if newTitle?.isEmpty == true || newTitle == currentTitle { newTitle = nil }
-        var newFolder = destination
-        if newFolder == .current(orgId: nil, folderId: currentFolderId) { newFolder = nil }
-        var shareTo: (orgId: String, folderId: String?)?
-        if let orgId = newFolder?.orgId {
-            guard case .cloud = target else { return false }
-            shareTo = (orgId, newFolder?.folderId)
-            newFolder = nil
+    /// Hold the folder half on offer, and name the recording with the title
+    /// half when there is one and it is not the name the recording already has.
+    private func show(_ proposal: FilingSuggestion, app: AppState) {
+        let title = proposal.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        suggestion =
+            proposal.folders.isEmpty ? nil : FilingSuggestion(title: "", folders: proposal.folders)
+        guard namingTask == nil else { return }
+        guard !title.isEmpty, title != currentTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        else {
+            // A title that is already the recording's and no folder left: the
+            // pass is spent, so say so where every device can read it.
+            if suggestion == nil, !title.isEmpty { resolveQuietly(app: app) }
+            return
         }
-        guard newTitle != nil || newFolder != nil || shareTo != nil else { return false }
+        let expected = currentTitle
+        namingTask = Task { [weak self] in
+            await self?.applyTitle(title, replacing: expected, app: app)
+            self?.namingTask = nil
+        }
+    }
+
+    /// Write the pass's title — the desktop's `applySuggestedTitle`. Only
+    /// while the recording is still called what it was when the pass started:
+    /// a rename in the meantime (here, or on the Mac) is the user's answer, and
+    /// the title is dropped.
+    ///
+    /// The folder half stays pending in the meta, title-less, so the desktop
+    /// and a later visit offer the same folders and never a second name.
+    private func applyTitle(_ title: String, replacing expected: String, app: AppState) async {
+        guard let target else { return }
+        let folders = suggestion?.folders ?? []
+        let pending = folders.isEmpty ? nil : FilingSuggestion(title: "", folders: folders)
+        do {
+            switch target {
+            case .cloud(let id):
+                var renamed = false
+                try await Self.write(id: id, cloud: app.cloud, resolving: false) { meta in
+                    // Either way the title half is answered: written, or
+                    // dropped because somebody named it first.
+                    meta.filingSuggestion = pending
+                    guard meta.title == expected else { return }
+                    meta.title = title
+                    renamed = true
+                }
+                guard renamed else { return }
+                AutoNamedTitles.shared.mark(id)
+            case .sample:
+                let store = SampleRecordingStore.shared
+                // A name the user gave the sample is theirs.
+                guard store.entry?.title == nil else { return }
+                store.setTitle(title)
+                if let id = store.summary?.id { AutoNamedTitles.shared.mark(id) }
+                if folders.isEmpty { store.answerSuggestion() }
+            }
+            guard !Task.isCancelled else { return }
+            currentTitle = title
+            onApplied?(title, nil, nil)
+        } catch {
+            // Best-effort: the suggestion still carries its title in the meta,
+            // so the next visit tries again.
+        }
+    }
+
+    // MARK: answering the folder half
+
+    /// File the recording under a chip's folder — the desktop's one-tap
+    /// accept. A folder that does not exist yet is created HERE and nowhere
+    /// earlier: merely offering a candidate must not bring it into being.
+    ///
+    /// One read-modify-write, which also resolves the suggestion.
+    @discardableResult
+    func file(into folder: FilingFolderSuggestion, app: AppState) async -> Bool {
+        guard !isWriting, let target else { return false }
         isWriting = true
         writeFailed = false
         defer { isWriting = false }
         do {
-            // `moves` separates "file at the top level" (a nil folder id) from
-            // "leave the folder alone".
-            var moves = false
-            var targetId: String?
             var created: CloudFolder?
-            switch newFolder {
-            case .newFolder(let name):
-                let folder = try await app.cloud.createFolder(name: name)
-                created = folder
-                targetId = folder.id
-                existingFolders.append(folder)
-                moves = true
-            case .some(let destination):
-                targetId = destination.folderId
-                moves = true
-            case nil:
-                break
+            let folderId: String
+            if let id = folder.folderId {
+                folderId = id
+            } else {
+                let made = try await app.cloud.createFolder(name: folder.name)
+                created = made
+                existingFolders.append(made)
+                folderId = made.id
             }
             switch target {
             case .cloud(let id):
                 try await Self.write(id: id, cloud: app.cloud) { meta in
-                    if let newTitle { meta.title = newTitle }
-                    if moves { meta.folderId = targetId }
-                }
-                if let shareTo {
-                    try await app.cloud.shareRecording(
-                        id: id, orgId: shareTo.orgId, folderId: shareTo.folderId)
+                    meta.folderId = folderId
                 }
             case .sample:
-                let store = SampleRecordingStore.shared
-                if let newTitle { store.setTitle(newTitle) }
-                if moves { store.setFolder(targetId) }
+                SampleRecordingStore.shared.setFolder(folderId)
+                SampleRecordingStore.shared.answerSuggestion()
             }
-            if let newTitle {
-                currentTitle = newTitle
-                // The name half is settled, whatever name it settled on. Only
-                // once the push is back: a write that threw leaves the offer
-                // open, because it is still worth taking.
-                titleAnswered = true
-            }
-            if moves || shareTo != nil {
-                if targetId != nil || shareTo != nil { GettingStartedStore.shared.mark(.filed) }
-                if moves { currentFolderId = targetId }
-                // The home half is settled, wherever it settled — including the
-                // folder created a moment ago, whose id came back from
-                // `createFolder`. Retiring it here is what stops a second tap
-                // creating a second folder under that same name. After the
-                // push, like the name: a write that threw is still worth
-                // retrying.
-                folderAnswered = true
-            }
-            onApplied?(newTitle, moves ? .current(orgId: nil, folderId: targetId) : nil, created)
-            if !hasSomethingToOffer {
-                if target == .sample { SampleRecordingStore.shared.answerSuggestion() }
-                onRetired?()
-            }
+            GettingStartedStore.shared.mark(.filed)
+            currentFolderId = folderId
+            // Retired only once the push is back: a write that threw is still
+            // worth retrying, and the same chip must not create a folder twice.
+            folderAnswered = true
+            onApplied?(nil, .current(orgId: nil, folderId: folderId), created)
+            onRetired?()
             return true
         } catch {
             writeFailed = true
@@ -425,68 +318,131 @@ final class FilingSuggestionModel: ObservableObject {
         }
     }
 
-    /// The user said no. The card goes at once — a dismiss that waits on the
-    /// network reads as a broken button — and the flag is written behind it.
+    /// 先不歸檔. The row changes at once — a dismiss that waits on the network
+    /// reads as a broken button — and the flag is written behind it.
     func dismiss(app: AppState) {
         let target = self.target
-        let cloud = app.cloud
         forget()
         onRetired?()
-        guard case .cloud(let id) = target else {
-            if target == .sample { SampleRecordingStore.shared.answerSuggestion() }
-            return
-        }
-        Task {
-            // Nothing is accepted here, but `filingSuggested` still has to
-            // land: see `write(id:cloud:apply:)`. Failure is ignored, because
-            // the worst case is the desktop asking once more about a recording
-            // that was already dealt with on the phone.
-            try? await Self.write(id: id, cloud: cloud) { _ in }
+        Self.resolve(target, cloud: app.cloud)
+    }
+
+    /// The recording was filed some other way — the folder picker — so the
+    /// suggestion is spent. Retired for good, as the desktop's `FilingRow`
+    /// resolves a spent suggestion.
+    func retireAfterFiling(app: AppState) {
+        guard suggestion != nil else { return }
+        dismiss(app: app)
+    }
+
+    /// The pass came back with nothing left to offer: write the flag so no
+    /// device asks again, without telling the page anything changed.
+    private func resolveQuietly(app: AppState) {
+        let target = self.target
+        self.target = nil
+        Self.resolve(target, cloud: app.cloud)
+    }
+
+    private static func resolve(_ target: Target?, cloud: CloudClient) {
+        switch target {
+        case .sample:
+            SampleRecordingStore.shared.answerSuggestion()
+        case .cloud(let id):
+            // Nothing is accepted, but `filingSuggested` still has to land.
+            // Failure is ignored: the worst case is the desktop asking once
+            // more about a recording already dealt with on the phone.
+            Task { try? await write(id: id, cloud: cloud) { _ in } }
+        case nil:
+            break
         }
     }
 
-    /// One read-modify-write against the recording's meta, then a push of the
-    /// meta and the summary together — the idiom `LibraryView.moveToFolder`
-    /// uses, for the same reason: the library lists the summary and the report
-    /// reads the meta, so a change written to only one of them is a recording
-    /// that disagrees with itself.
+    // MARK: renaming
+
+    /// The page header's rename — the user naming the recording themselves.
     ///
-    /// Every write through here sets `filingSuggested`, whatever it was called
-    /// for. The desktop reads that flag to decide whether its own filing pass
-    /// has already been spent on a recording; without it, a recording renamed
-    /// or dismissed on the phone would be asked about all over again the next
-    /// time it is opened on a Mac.
+    /// The desktop's `renameHistoryEntry` rule: every rename also retires the
+    /// pending suggestion's title (the user has now named it, so a "suggested
+    /// title" beside it is a competing name) and the 「自動命名」 tag. The
+    /// folder half, if any, stays on offer.
+    static func rename(id: String, to title: String, isSample: Bool, cloud: CloudClient) async throws {
+        if isSample {
+            SampleRecordingStore.shared.setTitle(title)
+        } else {
+            try await write(id: id, cloud: cloud, resolving: false) { meta in
+                meta.title = title
+                if let pending = meta.filingSuggestion {
+                    meta.filingSuggestion =
+                        pending.folders.isEmpty
+                        ? nil : FilingSuggestion(title: "", folders: pending.folders)
+                }
+            }
+        }
+        AutoNamedTitles.shared.retire(id)
+    }
+
+    /// One read-modify-write against the recording's meta, then a push of the
+    /// meta and the summary together — the library lists the summary and the
+    /// report reads the meta, so a change written to only one of them is a
+    /// recording that disagrees with itself.
+    ///
+    /// Every write sets `filingSuggested`: the desktop reads it to decide
+    /// whether its own pass has been spent. `resolving` also clears the
+    /// suggestion (answered, whichever way); a write that keeps the folder
+    /// half on offer leaves `filingSuggestion` to its `apply`.
     private static func write(
         id: String,
         cloud: CloudClient,
+        resolving: Bool = true,
         apply: (inout RecordingMeta) -> Void
     ) async throws {
         var meta = try await cloud.recordingMeta(id: id)
         apply(&meta)
         meta.filingSuggested = true
-        // Answered, whichever way: the desktop reads a non-null suggestion as
-        // still waiting, and would offer it again on the Mac.
-        meta.filingSuggestion = nil
-        // The library row is a projection of the meta and nothing else —
-        // fetching one separately and re-sending it is what lets a title land
-        // in the report and not in the list.
+        if resolving { meta.filingSuggestion = nil }
         try await cloud.pushRecording(
             id: id, summary: CloudRecordingSummary(projecting: meta), meta: meta)
     }
 
     #if DEBUG
-        /// ScreenshotDemo: the state the block is worth capturing in — a
-        /// recording that has landed under its clock name, with a better name
-        /// and a home on offer. `target` is deliberately left nil, so a
-        /// tap on the demo build's own buttons writes nothing: there is no
-        /// account behind the fixtures to write to.
+        /// ScreenshotDemo: a recording that has landed under its clock name
+        /// with a home on offer, and — a beat later — the name the pass gave
+        /// it. `target` is deliberately left nil, so the demo's own buttons
+        /// write nothing: there is no account behind the fixtures.
         func seedDemo(
-            suggestion: FilingSuggestion, currentTitle: String, folders: [CloudFolder]
+            suggestion: FilingSuggestion, currentTitle: String, folders: [CloudFolder],
+            namedAs title: String?, recordingId: String
         ) {
-            self.suggestion = suggestion
+            self.suggestion =
+                suggestion.folders.isEmpty
+                ? nil : FilingSuggestion(title: "", folders: suggestion.folders)
             self.currentTitle = currentTitle
             currentFolderId = nil
             existingFolders = folders
+            guard let title else { return }
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(1400))
+                AutoNamedTitles.shared.mark(recordingId)
+                self.currentTitle = title
+                onApplied?(title, nil, nil)
+            }
         }
     #endif
+}
+
+/// The recordings whose name is still the one Parley's filing pass gave them
+/// this session — the page header's quiet 「自動命名」 tag, the desktop's
+/// `titleAutoApplied`.
+///
+/// Process-lifetime on purpose, like the desktop's store flag: the tag says
+/// "this just happened, and it is yours to change", which stops being news
+/// after a relaunch. Any rename retires it.
+@MainActor
+final class AutoNamedTitles: ObservableObject {
+    static let shared = AutoNamedTitles()
+
+    @Published private(set) var ids: Set<String> = []
+
+    func mark(_ id: String) { ids.insert(id) }
+    func retire(_ id: String) { ids.remove(id) }
 }

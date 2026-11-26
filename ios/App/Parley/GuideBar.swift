@@ -25,8 +25,8 @@ struct GuideBar: View {
     /// whether the same accept renamed it.
     let filedFolder: String?
     let renamed: Bool
-    /// Whether the recording has a suggestion card to point at. Without one,
-    /// step 1's action opens the folder picker instead.
+    /// Whether the header's filing row has a folder suggestion to point at.
+    /// Without one, step 1's action opens the folder picker instead.
     let hasSuggestion: Bool
 
     let showSuggestion: () -> Void
@@ -60,7 +60,7 @@ struct GuideBar: View {
             step(
                 Text("1 / 3 · See what Parley did for you"),
                 body: Text(
-                    "Every recording gets a name and a suggested folder when it's done. You can change the title or pick your own folder, then tap Save."
+                    "Every recording gets a name and a suggested folder. Tap the name to change it, or pick your own folder. Try any suggested folder above."
                 )
             ) {
                 primary(hasSuggestion ? Text("Show me") : Text("Choose a folder"), showSuggestion)
@@ -72,7 +72,7 @@ struct GuideBar: View {
                 Text("2 / 3 · Replay"),
                 body: Text("Tap any line and the audio jumps to that moment. Try it.")
             ) {
-                primary(Text("Open the transcript"), openTranscript)
+                primary(Text("Open replay"), openTranscript)
             }
         case .confirmed(.replay):
             confirmation(Text("That's it. Search finds any word you remember."))

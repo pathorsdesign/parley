@@ -368,13 +368,15 @@ struct ResultTabBar: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            // As much of the row as the width allows: the full spacing, then a
-            // tighter one, and only when even that does not fit (a small phone
-            // in English: Summary · Actions · Notes · Background · Replay) a
-            // strip that scrolls — with its trailing edge fading out, so the
-            // tabs past the edge read as there, and the chosen one scrolled
-            // into view. Replay, the tab with the player, was off-screen with
-            // nothing to say so.
+            // Three tabs that are always there — 總結, 後續行動, 回放 — and, when
+            // the meeting has notes or a background, a 更多 ▾ menu after them for
+            // those two. Five tabs in a row overran a small phone (in English,
+            // Replay, the tab with the player, was off-screen), and the two
+            // that come and go are the ones most meetings do not have.
+            //
+            // The full spacing when it fits, a tighter one when that fits, and
+            // a scrolling strip with fading edges only as the last resort (the
+            // largest text sizes).
             ViewThatFits(in: .horizontal) {
                 row(spacing: 22, inset: 20)
                 row(spacing: 14, inset: 16)
@@ -404,11 +406,17 @@ struct ResultTabBar: View {
         }
     }
 
+    /// The tabs always in the row.
+    private var primary: [ResultTab] { tabs.filter { $0 != .notes && $0 != .context } }
+    /// The ones behind 更多: present only when the meeting has them.
+    private var secondary: [ResultTab] { tabs.filter { $0 == .notes || $0 == .context } }
+
     private func row(spacing: CGFloat, inset: CGFloat) -> some View {
         HStack(alignment: .bottom, spacing: spacing) {
-            ForEach(tabs, id: \.self) { tab in
+            ForEach(primary, id: \.self) { tab in
                 button(tab)
             }
+            if !secondary.isEmpty { moreMenu }
         }
         .padding(.horizontal, inset)
         .fixedSize()
@@ -418,9 +426,10 @@ struct ResultTabBar: View {
         ScrollViewReader { proxy in
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(alignment: .bottom, spacing: 18) {
-                    ForEach(tabs, id: \.self) { tab in
+                    ForEach(primary, id: \.self) { tab in
                         button(tab).id(tab)
                     }
+                    if !secondary.isEmpty { moreMenu.id(ResultTab.notes) }
                 }
                 .padding(.leading, 16)
                 .padding(.trailing, 28)
@@ -446,6 +455,45 @@ struct ResultTabBar: View {
                 withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo(tab, anchor: .center) }
             }
         }
+    }
+
+    /// 更多 ▾: the notes and the background. Once one of them is open the
+    /// menu wears its name (筆記 ▾) and the tab's underline, so the row still
+    /// says where the reader is.
+    private var moreMenu: some View {
+        let chosen = secondary.contains(selection) ? selection : nil
+        return Menu {
+            ForEach(secondary, id: \.self) { tab in
+                Button {
+                    selection = tab
+                } label: {
+                    if tab == selection {
+                        Label(tab.label, systemImage: "checkmark")
+                    } else {
+                        Text(tab.label)
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Text(chosen?.label ?? "More")
+                    .font(chosen != nil ? .parley.subheadline.weight(.semibold) : .parley.subheadline)
+                    .foregroundStyle(chosen != nil ? Color(.label) : Color(.secondaryLabel))
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(Color(.tertiaryLabel))
+            }
+            .padding(.top, 6)
+            .padding(.bottom, 10)
+            .overlay(alignment: .bottom) {
+                Capsule()
+                    .fill(chosen != nil ? Theme.primary : Color.clear)
+                    .frame(height: 2)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(chosen != nil ? .isSelected : [])
     }
 
     private func button(_ tab: ResultTab) -> some View {

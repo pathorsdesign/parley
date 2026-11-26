@@ -279,9 +279,15 @@ struct RecordingDetailView: View {
             // Search is its own button rather than a menu row: finding a
             // phrase is something you do *while reading*, over and over. It
             // belongs to 回放, where the transcript is.
-            ToolbarItem(placement: .topBarTrailing) { searchButton }
-            ToolbarItem(placement: .topBarTrailing) { askYourAI }
-            ToolbarItem(placement: .topBarTrailing) { moreMenu }
+            //
+            // One group, not three items: separate trailing items that come
+            // and go (search off 回放) were re-ordered by the bar, putting the
+            // menu before AskYourAi on some opens.
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                searchButton
+                askYourAI
+                moreMenu
+            }
         }
         .sheet(isPresented: $sharingToAI) {
             ShareSheet(items: [handoffText()]) { completed in

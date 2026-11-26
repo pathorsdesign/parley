@@ -257,12 +257,29 @@ public struct RecordingMeta: @unchecked Sendable {
         public let done: Bool
         /// Where on the recording it came from, when the analysis could say.
         public let atMs: UInt64?
+        /// Whose follow-up it is (`ActionItem.side`, types.ts): `us` for the
+        /// user's own side, `them` for the other party. nil on items made
+        /// before sides existed — those read as one flat list, as on the
+        /// desktop.
+        public let side: Side?
+        /// Who should do it, by the name the meeting used. nil when the
+        /// transcript does not make it clear.
+        public let owner: String?
 
-        public init(id: String, text: String, done: Bool, atMs: UInt64?) {
+        public enum Side: String, Sendable {
+            case us, them
+        }
+
+        public init(
+            id: String, text: String, done: Bool, atMs: UInt64?, side: Side? = nil,
+            owner: String? = nil
+        ) {
             self.id = id
             self.text = text
             self.done = done
             self.atMs = atMs
+            self.side = side
+            self.owner = owner
         }
     }
 
@@ -278,7 +295,12 @@ public struct RecordingMeta: @unchecked Sendable {
                 id: item["id"] as? String ?? "action-\(index)",
                 text: text,
                 done: item["done"] as? Bool ?? false,
-                atMs: (item["atMs"] as? Double).map { UInt64(max(0, $0)) })
+                atMs: (item["atMs"] as? Double).map { UInt64(max(0, $0)) },
+                side: (item["side"] as? String).flatMap(ActionItem.Side.init(rawValue:)),
+                owner: (item["owner"] as? String).flatMap { owner in
+                    let trimmed = owner.trimmingCharacters(in: .whitespacesAndNewlines)
+                    return trimmed.isEmpty ? nil : trimmed
+                })
         }
     }
 

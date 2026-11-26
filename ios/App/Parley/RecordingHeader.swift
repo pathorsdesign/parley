@@ -368,14 +368,19 @@ struct ResultTabBar: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(alignment: .bottom, spacing: 22) {
-                    ForEach(tabs, id: \.self) { tab in
-                        button(tab)
-                    }
-                }
-                .padding(.horizontal, 20)
+            // As much of the row as the width allows: the full spacing, then a
+            // tighter one, and only when even that does not fit (a small phone
+            // in English: Summary · Actions · Notes · Background · Replay) a
+            // strip that scrolls — with its trailing edge fading out, so the
+            // tabs past the edge read as there, and the chosen one scrolled
+            // into view. Replay, the tab with the player, was off-screen with
+            // nothing to say so.
+            ViewThatFits(in: .horizontal) {
+                row(spacing: 22, inset: 20)
+                row(spacing: 14, inset: 16)
+                scrollingRow
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
             if playingElsewhere {
                 Button(action: pause) {
                     Image(systemName: "pause.circle.fill")
@@ -396,6 +401,50 @@ struct ResultTabBar: View {
             Rectangle()
                 .fill(Color(.separator))
                 .frame(height: 0.5)
+        }
+    }
+
+    private func row(spacing: CGFloat, inset: CGFloat) -> some View {
+        HStack(alignment: .bottom, spacing: spacing) {
+            ForEach(tabs, id: \.self) { tab in
+                button(tab)
+            }
+        }
+        .padding(.horizontal, inset)
+        .fixedSize()
+    }
+
+    private var scrollingRow: some View {
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(alignment: .bottom, spacing: 18) {
+                    ForEach(tabs, id: \.self) { tab in
+                        button(tab).id(tab)
+                    }
+                }
+                .padding(.leading, 16)
+                .padding(.trailing, 28)
+            }
+            // Both edges fade, so a tab cut by either edge reads as one that
+            // continues rather than as a clipped word.
+            .mask(
+                HStack(spacing: 0) {
+                    LinearGradient(
+                        colors: [.black.opacity(0), .black],
+                        startPoint: .leading, endPoint: .trailing
+                    )
+                    .frame(width: 16)
+                    Color.black
+                    LinearGradient(
+                        colors: [.black, .black.opacity(0)],
+                        startPoint: .leading, endPoint: .trailing
+                    )
+                    .frame(width: 28)
+                })
+            .onAppear { proxy.scrollTo(selection, anchor: .center) }
+            .onChange(of: selection) { _, tab in
+                withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo(tab, anchor: .center) }
+            }
         }
     }
 

@@ -54,6 +54,8 @@ ROUTES=(
   "summary:a recording's 總結 tab, filed in a folder"
   "actions:the 後續行動 tab, grouped us / them, with next steps"
   "notes:the 筆記 tab, the notes typed during the meeting"
+  "delivery:the 評分 tab, the delivery report for the user, every section filled"
+  "delivery-unmarked:the 評分 tab of a recording with nobody marked as the user"
   "jump:the summary, jumped to a lit turn on 回放"
   "nosummary:a recording with no summary yet, not filed, nothing suggested"
   "movetofolder:the folder picker over fifteen folders"

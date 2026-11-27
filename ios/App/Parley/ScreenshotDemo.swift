@@ -253,6 +253,20 @@
                 tab = .library
                 forcedTab = .notes
                 showTranscript = true
+            case "delivery":
+                // 評分: the delivery report for the user (speaker B), with
+                // every section filled and the desktop's tone read.
+                tab = .library
+                forcedTab = .delivery
+                showTranscript = true
+            case "delivery-unmarked":
+                // The same report for a recording nobody has said who the
+                // user is in: the question above it, 標記為我 beside the
+                // speakers, and no tone read.
+                tab = .library
+                recordingID = "demo-review"
+                forcedTab = .delivery
+                showTranscript = true
             case "jump":
                 // A moment in the summary, tapped: 回放 with that turn lit and
                 // the 💡 notes beside it.
@@ -644,6 +658,75 @@
             ]
         }
 
+        /// How the meeting goes on past the six turns the bundled audio
+        /// speaks: the walk through onboarding and pricing, with the user
+        /// (speaker 2) talking in runs — so 評分 has a pace line with several
+        /// points, pauses between the user's own lines, the fillers a real
+        /// explanation carries (然後, 就是, 那個 / like, you know) and one
+        /// stumble repeated back to back. Only the result page's meta carries
+        /// them; the live and just-ended frames keep the six.
+        private static var laterLines: [(speaker: Int, start: UInt64, end: UInt64, text: String)] {
+            [
+                (1, 110_000, 118_000, t(
+                    "Before you send it, can you walk me through what the first month looks like?",
+                    "寄之前，可以先跟我講一下第一個月會怎麼進行嗎？")),
+                (2, 120_000, 134_000, t(
+                    "Sure. So the first week, like, we set up the accounts, and then we, you know, connect your Okta.",
+                    "好，那個第一週我們會先開帳號，然後就是把你們的 Okta 接起來。")),
+                (2, 137_000, 150_000, t(
+                    "The second week is basically training. We can split it into two sessions so the the whole team fits in.",
+                    "然後第二週其實就是教育訓練，我們可以我們可以分兩梯，讓不同部門都排得進來。")),
+                (2, 154_000, 166_000, t(
+                    "Week three is go-live, and basically anything that comes up, you come straight to me.",
+                    "第三週開始就是正式上線，那個期間有問題都可以直接找我。")),
+                (1, 168_000, 178_000, t(
+                    "That works. What finance will ask is how you got from the eighty-seat number to forty.",
+                    "聽起來可以。財務一定會問的是，八十席跟四十席的價差你們怎麼算。")),
+                (2, 180_000, 196_000, t(
+                    "Right, I actually have that ready. Forty is the enterprise unit price, and, like, the price hold goes in an addendum.",
+                    "對，這個我其實有準備。就是四十席是用企業版的單價，然後鎖價的部分會寫在附約裡。")),
+                (2, 198_500, 212_000, t(
+                    "And if you add seats next year, it's this year's unit price, you know, no new quote.",
+                    "然後如果明年你們要加席次，就是照今年的單價往上加，不會重新報價。")),
+                (1, 214_000, 222_000, t(
+                    "Good. That needs to be in writing.",
+                    "好，這個要寫清楚。")),
+                (2, 224_000, 236_000, t(
+                    "No problem. I'll put that clause in and, like, send it all over tomorrow.",
+                    "沒問題，我會把那個條款寫進去，然後明天一起寄給你。")),
+                (2, 241_000, 252_000, t(
+                    "Actually, I can send a draft first so your legal team can take a look.",
+                    "其實我也可以先寄一份草稿，你們法務可以先看。")),
+                (1, 254_000, 262_000, t(
+                    "Even better. Send the draft first.",
+                    "那更好，先寄草稿吧。")),
+                (2, 264_000, 274_000, t(
+                    "Great, so that's the plan. Thanks for your time today.",
+                    "好，那就這樣，謝謝你今天的時間。")),
+            ]
+        }
+
+        /// The desktop's tone read of the user, as its analysis leaves it on
+        /// the meta (`DeliveryAssessment`).
+        private static var deliveryAssessment: [String: Any] {
+            [
+                "tone": "warm",
+                "toneEvidence": t(
+                    "No problem. I'll put that clause in", "沒問題，我會把那個條款寫進去"),
+                "fillers": [
+                    "level": "frequent",
+                    "examples": isChinese ? ["然後", "就是"] : ["like", "you know"],
+                    "note": t(
+                        "“Like” and “you know” stack up while walking through onboarding.",
+                        "說明導入流程時「然後」「就是」接連出現。"),
+                ] as [String: Any],
+                "pace": "comfortable",
+                "summary": t(
+                    "Warm and well prepared, with a clear account of the pricing. Fillers pile up when walking through the plan — a beat of silence between points would land better.",
+                    "語氣親和、回答有準備，價格說明清楚；講流程時贅字偏多，可以在每一點之間先停一下再接下一點。"),
+            ]
+        }
+
         /// The three findings `featured.findingsCount` has always claimed.
         /// Written as an analyst would: what happened, and why it matters to the
         /// next conversation. The transcript frame renders them above the turns,
@@ -689,6 +772,9 @@
             bare.raw["actionItems"] = [Any]()
             bare.raw["brief"] = nil
             bare.raw["meetingContext"] = nil
+            // Nobody marked as the user and no tone read: 評分 asks who is who.
+            bare.raw["selfSpeaker"] = nil
+            bare.raw["deliveryAssessment"] = nil
             return bare
         }
 
@@ -747,7 +833,16 @@
                         "text": line.text, "isFinal": true,
                         "startMs": Double(line.ms), "endMs": Double(line.ms + 12_000),
                     ] as [String: Any]
-                },
+                }
+                    + laterLines.map { line in
+                        [
+                            "id": "mix-\(line.start)", "source": "mix", "speaker": line.speaker,
+                            "text": line.text, "isFinal": true,
+                            "startMs": Double(line.start), "endMs": Double(line.end),
+                        ] as [String: Any]
+                    },
+                "selfSpeaker": "mix-2",
+                "deliveryAssessment": deliveryAssessment,
                 "speakerNames": [
                     "mix-1": t("Client lead", "客戶窗口"),
                     "mix-2": t("You", "我"),

@@ -1,10 +1,11 @@
 import ParleyKit
 import SwiftUI
 
-/// The result page's tabs, in the desktop's order (`STUDY_TABS`). There is no
-/// 評分: the phone has no delivery data to score.
+/// The result page's tabs. The row shows 總結 · 後續行動 · 評分 · 回放 in this
+/// order, with 筆記 and 會議背景 behind 更多 ▾ (see `ResultTabBar`). 評分 is
+/// the desktop's delivery report, computed from the transcript on the phone.
 enum ResultTab: String, Hashable, CaseIterable {
-    case summary, actions, notes, context, replay
+    case summary, actions, delivery, notes, context, replay
 
     /// The desktop's `study.tab.*` labels. Keyed rather than written in
     /// English because "Summary", "Notes" and "Replay" are already catalog
@@ -14,6 +15,7 @@ enum ResultTab: String, Hashable, CaseIterable {
         switch self {
         case .summary: "result.tab.summary"
         case .actions: "result.tab.actions"
+        case .delivery: "result.tab.delivery"
         case .notes: "result.tab.notes"
         case .context: "result.tab.context"
         case .replay: "result.tab.replay"
@@ -368,7 +370,8 @@ struct ResultTabBar: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            // Three tabs that are always there — 總結, 後續行動, 回放 — and, when
+            // The fixed tabs — 總結, 後續行動, 評分 (when there is a
+            // transcript to score), 回放 — and, when
             // the meeting has notes or a background, a 更多 ▾ menu after them for
             // those two. Five tabs in a row overran a small phone (in English,
             // Replay, the tab with the player, was off-screen), and the two

@@ -1,5 +1,6 @@
 import ParleyKit
 import SwiftUI
+import os
 
 /// A synced recording's result page — the desktop's report
 /// (`src/components/study/StudyScreen.tsx`), on a phone.
@@ -76,6 +77,7 @@ struct RecordingDetailView: View {
     /// purpose: coming back to a recording a minute later should land where
     /// you were, and a recording opened next week should open on its summary.
     @MainActor private static var rememberedTabs: [String: ResultTab] = [:]
+    private static let log = Logger(subsystem: ParleyLog.subsystem, category: "delivery")
     /// The turn a jump from the summary landed on, washed in the tint for a
     /// moment so the eye finds it. Also the guided lap's "this is a turn" pulse.
     @State private var litTurn: String?
@@ -588,6 +590,7 @@ struct RecordingDetailView: View {
         switch tab {
         case .summary: "Copy Summary"
         case .actions: "Copy Actions"
+        case .delivery: "Copy transcript"
         case .notes: "Copy Notes"
         case .context: "Copy Background"
         case .replay: "Copy transcript"
@@ -614,7 +617,7 @@ struct RecordingDetailView: View {
                 .joined(separator: "\n\n")
         case .notes: text = notes(meta)
         case .context: text = background(meta)
-        case .replay: return nil
+        case .delivery, .replay: return nil
         }
         return text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : text
     }
@@ -837,6 +840,9 @@ struct RecordingDetailView: View {
             switch candidate {
             case .notes: !notes(meta).isEmpty
             case .context: !background(meta).isEmpty
+            // Something to score: at least one final line with words in it.
+            case .delivery:
+                readable.contains { !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
             default: true
             }
         }
@@ -932,8 +938,39 @@ struct RecordingDetailView: View {
             ContextPage(
                 caption: "Prepared before the meeting; the AI reads it with the transcript",
                 text: background(meta), seek: { jump(to: $0) })
+        case .delivery:
+            DeliveryPage(meta: meta, markSelf: markSelf, seek: { jump(to: $0) })
         case .replay:
             replay(meta)
+        }
+    }
+
+    /// 標記為我 on the 評分 tab: the desktop's `markSelfSpeaker`. The mark is
+    /// kept on the screen at once; a personal recording also writes it to the
+    /// meta (a read-modify-write, so nothing the Mac changed meanwhile is lost)
+    /// — and, when the mark moved, drops the tone read, which judged whoever
+    /// was the user before. The sample, the demo and an organization's
+    /// recordings keep the mark on the screen only.
+    private func markSelf(_ key: String?) {
+        guard meta?.markSelf(key) == true else { return }
+        guard orgId == nil, !isSample else { return }
+        #if DEBUG
+            if ScreenshotDemo.servesFixtures { return }
+        #endif
+        let id = summary.id
+        let fallback = summary
+        let cloud = app.cloud
+        Task {
+            do {
+                var fresh = try await cloud.recordingMeta(id: id)
+                guard fresh.markSelf(key) else { return }
+                try await cloud.pushRecording(
+                    id: id, summary: CloudRecordingSummary(projecting: fresh, fallback: fallback),
+                    meta: fresh)
+            } catch {
+                Self.log.warning(
+                    "saving the self mark failed: \(error.localizedDescription, privacy: .public)")
+            }
         }
     }
 

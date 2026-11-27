@@ -475,9 +475,9 @@ struct RecordingDetailView: View {
             // Drawn like the ··· beside it: a toolbar glyph in the bar's
             // tint, with its words. The plug is the desktop's (lucide `Plug`).
             HStack(spacing: 5) {
-                Image(systemName: "powerplug")
+                plugGlyph
                     .accessibilityHidden(true)
-                Text("Hand it to your AI")
+                Text("Connect AI")
                     .font(.parley.subheadline)
                     .lineLimit(1)
                     .fixedSize()
@@ -502,6 +502,17 @@ struct RecordingDetailView: View {
     private func openTabCopyText() -> String? {
         if tab == .replay { return readable.isEmpty ? nil : plainTranscript() }
         return pageText()
+    }
+
+    /// lucide's `Plug` as the desktop draws it: upright, prongs up. iOS 18
+    /// has that glyph; before it, the sideways plug turned upright.
+    @ViewBuilder
+    private var plugGlyph: some View {
+        if #available(iOS 18, *) {
+            Image(systemName: "powerplug.portrait")
+        } else {
+            Image(systemName: "powerplug").rotationEffect(.degrees(-90))
+        }
     }
 
     private var moreMenu: some View {

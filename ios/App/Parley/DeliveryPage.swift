@@ -105,86 +105,82 @@ struct DeliveryPage: View {
                 isFinal: true, startMs: 0, endMs: 0))
     }
 
-    /// One chip per speaker with their share of the talk, the user first with a
-    /// person mark; after them, the one action for the speaker on screen.
+    /// The desktop's shadcn tabs: one segment per speaker with their share of
+    /// the talk, on a grey track, the one on screen raised in white; the user
+    /// first, with a person mark. The one action for the speaker on screen sits
+    /// at the row's far end, as the desktop's outline button.
     private func speakerSwitch(_ r: Report) -> some View {
         let total = r.roster.reduce(0) { $0 + $1.talkMs }
-        return FlowLayout(spacing: 8) {
-            ForEach(r.roster) { entry in
-                let active = entry.key == r.viewed.key
-                let share = total > 0 ? Int((Double(entry.talkMs) / Double(total) * 100).rounded()) : 0
-                Button {
-                    picked = entry.key
-                } label: {
-                    HStack(spacing: 5) {
-                        if entry.isSelf {
-                            Image(systemName: "person.fill")
-                                .font(.parley.caption2)
-                                .accessibilityLabel(Text(L("delivery.speaker.me")))
-                        }
-                        Text(verbatim: label(entry))
-                            .font(active ? .parley.footnote.weight(.semibold) : .parley.footnote)
-                            .lineLimit(1)
-                        Text(verbatim: "\(share)%")
-                            .font(.parley.caption.monospacedDigit())
-                            .foregroundStyle(Color(.secondaryLabel))
+        return HStack(spacing: 10) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 2) {
+                    ForEach(r.roster) { entry in
+                        segment(entry, active: entry.key == r.viewed.key, total: total)
                     }
-                    .foregroundStyle(active ? Theme.primary : Color(.label))
-                    .padding(.horizontal, 12)
-                    .frame(minHeight: 32)
-                    .background(Capsule().fill(active ? Theme.primary.opacity(0.1) : Color.clear))
-                    .overlay(
-                        Capsule().strokeBorder(
-                            active ? Color.clear : Color(.separator), lineWidth: 0.5))
-                    .contentShape(Capsule())
                 }
-                .buttonStyle(.plain)
-                .accessibilityAddTraits(active ? [.isSelected, .isButton] : .isButton)
+                .padding(3)
+                .background(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(Color(.tertiarySystemFill)))
             }
+            .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
+            .fixedSize(horizontal: false, vertical: true)
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel(Text(L("delivery.speaker.aria")))
             identity(r)
         }
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel(Text(L("delivery.speaker.aria")))
+    }
+
+    private func segment(_ entry: DeliverySpeakers.RosterEntry, active: Bool, total: Int) -> some View {
+        let share = total > 0 ? Int((Double(entry.talkMs) / Double(total) * 100).rounded()) : 0
+        return Button {
+            picked = entry.key
+        } label: {
+            HStack(spacing: 5) {
+                if entry.isSelf {
+                    Image(systemName: "person")
+                        .font(.parley.caption)
+                        .accessibilityLabel(Text(L("delivery.speaker.me")))
+                }
+                Text(verbatim: label(entry))
+                    .font(.parley.footnote.weight(active ? .medium : .regular))
+                    .lineLimit(1)
+                Text(verbatim: "\(share)%")
+                    .font(.parley.footnote.monospacedDigit())
+                    .foregroundStyle(Color(.secondaryLabel))
+            }
+            .foregroundStyle(active ? Color(.label) : Color(.secondaryLabel))
+            .padding(.horizontal, 10)
+            .frame(minHeight: 30)
+            .background {
+                if active {
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .fill(Color(.systemBackground))
+                        .shadow(color: .black.opacity(0.08), radius: 1.5, y: 1)
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(active ? [.isSelected, .isButton] : .isButton)
     }
 
     /// Who the speaker on screen is to Parley, and the one action that
-    /// changes it: undo the user's own mark, or 標記為我.
+    /// changes it: undo the user's own mark, or 標記為我 — an outline button
+    /// either way, the desktop's.
     @ViewBuilder
     private func identity(_ r: Report) -> some View {
         if r.viewed.isSelf, let user = r.user {
             // An automatic answer (the desktop's mic track) has nothing to undo.
             if user.origin == .marked, meta.selfSpeaker == r.viewed.key {
-                Button {
+                OutlineButton(title: L("delivery.speaker.unmark"), icon: "person.slash") {
                     markSelf(nil)
-                } label: {
-                    Text(L("delivery.speaker.unmark"))
-                        .font(.parley.footnote)
-                        .foregroundStyle(Color(.secondaryLabel))
-                        .frame(minHeight: 32)
-                        .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
             }
         } else {
-            // Nobody is the user yet: the button is the page's question, so it
-            // stands out; once someone is, re-marking is a quieter correction.
-            let asking = r.user == nil
-            Button {
+            OutlineButton(title: L("delivery.speaker.markMe"), icon: "person") {
                 markSelf(r.viewed.key)
-            } label: {
-                Label(L("delivery.speaker.markMe"), systemImage: "person.fill")
-                    .font(.parley.footnote.weight(asking ? .semibold : .regular))
-                    .foregroundStyle(asking ? Theme.primary : Color(.secondaryLabel))
-                    .padding(.horizontal, asking ? 12 : 0)
-                    .frame(minHeight: 32)
-                    .overlay {
-                        if asking {
-                            Capsule().strokeBorder(Theme.primary.opacity(0.5), lineWidth: 1)
-                        }
-                    }
-                    .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
         }
     }
 
@@ -235,8 +231,8 @@ struct DeliveryPage: View {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Text(verbatim: n)
-                        .font(.parley.caption.weight(.semibold).monospacedDigit())
-                        .foregroundStyle(Theme.primary)
+                        .font(.system(.caption, design: .monospaced).weight(.semibold))
+                        .foregroundStyle(Color(.secondaryLabel))
                     Text(title)
                         .font(.parley.headline)
                         .foregroundStyle(Color(.label))
@@ -294,7 +290,7 @@ struct DeliveryPage: View {
                                     .lineLimit(1)
                                     .truncationMode(.tail)
                                 Spacer(minLength: 8)
-                                MomentLink(ms: UInt64(rep.atMs), seek: seek)
+                                Stamp(ms: rep.atMs, seek: seek)
                             }
                             .padding(.vertical, 2)
                             .overlay(alignment: .top) {
@@ -451,40 +447,61 @@ private struct Kpi: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)
         .overlay(
-            RoundedRectangle(cornerRadius: Theme.radius, style: .continuous)
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .strokeBorder(Color(.separator), lineWidth: 0.5))
         .accessibilityElement(children: .combine)
     }
 }
 
-/// A chart's small title, the chart, and an optional one-line reading of it.
+/// The desktop's `Chart` card: a small grey title, the chart, and — under a
+/// hairline — an optional one-line reading of it.
 private struct ChartBlock<Content: View, Note: View>: View {
     let title: String
+    let hasNote: Bool
     @ViewBuilder let content: Content
     @ViewBuilder let note: Note
 
     init(title: String, @ViewBuilder content: () -> Content, @ViewBuilder note: () -> Note) {
         self.title = title
+        self.hasNote = true
         self.content = content()
         self.note = note()
     }
 
+    fileprivate init(title: String, noNote content: () -> Content) where Note == EmptyView {
+        self.title = title
+        self.hasNote = false
+        self.content = content()
+        self.note = EmptyView()
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(title)
-                .font(.parley.footnote.weight(.semibold))
-                .foregroundStyle(Color(.secondaryLabel))
-                .accessibilityAddTraits(.isHeader)
-            content
-            note
+        VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 10) {
+                Text(title)
+                    .font(.parley.footnote.weight(.semibold))
+                    .foregroundStyle(Color(.secondaryLabel))
+                    .accessibilityAddTraits(.isHeader)
+                content
+            }
+            .padding(14)
+            if hasNote {
+                Rectangle().fill(Color(.separator)).frame(height: 0.5)
+                note
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 9)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .strokeBorder(Color(.separator), lineWidth: 0.5))
     }
 }
 
 extension ChartBlock where Note == EmptyView {
     init(title: String, @ViewBuilder content: () -> Content) {
-        self.init(title: title, content: content, note: { EmptyView() })
+        self.init(title: title, noNote: content)
     }
 }
 
@@ -496,17 +513,74 @@ private struct NoteLine: View {
     var body: some View {
         FlowLayout(spacing: 4) {
             ForEach(Array(parts.enumerated()), id: \.offset) { index, part in
-                HStack(spacing: 4) {
+                HStack(spacing: 5) {
                     if index > 0 {
                         Text(verbatim: "·").foregroundStyle(Color(.tertiaryLabel))
                     }
                     Text(verbatim: part.text)
                         .font(.parley.caption)
                         .foregroundStyle(Color(.secondaryLabel))
-                    MomentLink(ms: UInt64(part.ms), seek: seek)
+                    Stamp(ms: part.ms, seek: seek)
                 }
             }
         }
+    }
+}
+
+/// The desktop's `Stamp`: a meeting moment as a small neutral outlined chip in
+/// mono digits. On the phone it also jumps to that moment on 回放.
+private struct Stamp: View {
+    let ms: Int
+    let seek: (UInt64) -> Void
+
+    var body: some View {
+        Button {
+            seek(UInt64(max(0, ms)))
+        } label: {
+            Text(verbatim: SpeechStats.clock(ms))
+                .font(.system(.caption2, design: .monospaced))
+                .foregroundStyle(Color(.secondaryLabel))
+                .padding(.horizontal, 5)
+                .frame(minHeight: 18)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 4, style: .continuous)
+                        .strokeBorder(Color(.separator), lineWidth: 0.5))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+/// The desktop's `Button variant="outline" size="sm"`: a hairline-bordered
+/// rounded rectangle on the page colour, label-coloured, with a glyph.
+private struct OutlineButton: View {
+    let title: String
+    let icon: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 5) {
+                Image(systemName: icon)
+                    .font(.parley.caption)
+                    .accessibilityHidden(true)
+                Text(verbatim: title)
+                    .font(.parley.footnote.weight(.medium))
+                    .lineLimit(1)
+            }
+            .fixedSize()
+            .foregroundStyle(Color(.label))
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(Color(.systemBackground)))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .strokeBorder(Color(.separator), lineWidth: 0.5))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 }
 

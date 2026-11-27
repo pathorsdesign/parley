@@ -1315,6 +1315,22 @@
         }
       }
     },
+    "Connect AI" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Connect AI"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "連接 AI"
+          }
+        }
+      }
+    },
     "Connecting transcription…" : {
       "extractionState" : "manual",
       "localizations" : {

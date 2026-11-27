@@ -504,15 +504,12 @@ struct RecordingDetailView: View {
         return pageText()
     }
 
-    /// lucide's `Plug` as the desktop draws it: upright, prongs up. iOS 18
-    /// has that glyph; before it, the sideways plug turned upright.
-    @ViewBuilder
+    /// lucide's `Plug`, the desktop's glyph on this button, drawn from its
+    /// own paths (24-unit box, 2-unit round stroke) so it is the same mark.
     private var plugGlyph: some View {
-        if #available(iOS 18, *) {
-            Image(systemName: "powerplug.portrait")
-        } else {
-            Image(systemName: "powerplug").rotationEffect(.degrees(-90))
-        }
+        LucidePlug()
+            .stroke(style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
+            .frame(width: 17, height: 17)
     }
 
     private var moreMenu: some View {
@@ -2132,3 +2129,23 @@ struct RecordingDetailView: View {
     }
 }
 
+
+/// lucide's `plug` icon (ISC licence): two prongs, the body, the cord.
+private struct LucidePlug: Shape {
+    func path(in rect: CGRect) -> Path {
+        var p = Path()
+        p.move(to: CGPoint(x: 9, y: 2)); p.addLine(to: CGPoint(x: 9, y: 8))
+        p.move(to: CGPoint(x: 15, y: 2)); p.addLine(to: CGPoint(x: 15, y: 8))
+        p.move(to: CGPoint(x: 12, y: 17)); p.addLine(to: CGPoint(x: 12, y: 22))
+        // M17 8a1 1 0 0 1 1 1v4a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V9a1 1 0 0 1 1-1z
+        p.move(to: CGPoint(x: 12, y: 8))
+        p.addArc(tangent1End: CGPoint(x: 18, y: 8), tangent2End: CGPoint(x: 18, y: 17), radius: 1)
+        p.addArc(tangent1End: CGPoint(x: 18, y: 17), tangent2End: CGPoint(x: 6, y: 17), radius: 4)
+        p.addArc(tangent1End: CGPoint(x: 6, y: 17), tangent2End: CGPoint(x: 6, y: 8), radius: 4)
+        p.addArc(tangent1End: CGPoint(x: 6, y: 8), tangent2End: CGPoint(x: 18, y: 8), radius: 1)
+        p.closeSubpath()
+        let scale = min(rect.width, rect.height) / 24
+        return p.applying(
+            CGAffineTransform(translationX: rect.minX, y: rect.minY).scaledBy(x: scale, y: scale))
+    }
+}

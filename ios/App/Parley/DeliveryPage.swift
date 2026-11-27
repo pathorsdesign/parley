@@ -336,7 +336,7 @@ struct DeliveryPage: View {
                                 + (assessment.fillerNote.isEmpty ? "" : " · \(assessment.fillerNote)")
                         )
                         .font(.parley.footnote)
-                        .foregroundStyle(frequent ? Theme.warning : Color(.label))
+                        .foregroundStyle(frequent ? Theme.warningText : Color(.label))
                         .fixedSize(horizontal: false, vertical: true)
                     }
                 }
@@ -363,7 +363,7 @@ struct DeliveryPage: View {
     static func toneColor(_ tone: DeliveryAssessment.Tone) -> Color {
         switch tone {
         case .rude, .aggressive: Theme.destructive
-        case .sharp: Theme.warning
+        case .sharp: Theme.warningText
         case .warm: Theme.success
         case .neutral, .firm: Color(.label)
         }
@@ -429,7 +429,7 @@ private struct Kpi: View {
             HStack(alignment: .firstTextBaseline, spacing: 4) {
                 Text(verbatim: value)
                     .font(.parley.title2.monospacedDigit())
-                    .foregroundStyle(watch ? Theme.warning : Color(.label))
+                    .foregroundStyle(watch ? Theme.warningText : Color(.label))
                 if let unit {
                     Text(unit)
                         .font(.parley.caption)

@@ -505,11 +505,12 @@ struct RecordingDetailView: View {
     }
 
     /// lucide's `Plug`, the desktop's glyph on this button, drawn from its
-    /// own paths (24-unit box, 2-unit round stroke) so it is the same mark.
+    /// own paths (24-unit box, round stroke) so it is the same mark.
     private var plugGlyph: some View {
         LucidePlug()
-            .stroke(style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
-            .frame(width: 17, height: 17)
+            // lucide's 2 of 24 units, at this size.
+            .stroke(style: StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round))
+            .frame(width: 18, height: 18)
     }
 
     private var moreMenu: some View {

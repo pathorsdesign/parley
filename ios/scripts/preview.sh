@@ -56,6 +56,7 @@ ROUTES=(
   "notes:the 筆記 tab, the notes typed during the meeting"
   "delivery:the 評分 tab, the delivery report for the user, every section filled"
   "delivery-unmarked:the 評分 tab of a recording with nobody marked as the user"
+  "delivery-group:the 評分 tab of a four-person call, the user marked"
   "jump:the summary, jumped to a lit turn on 回放"
   "nosummary:a recording with no summary yet, not filed, nothing suggested"
   "movetofolder:the folder picker over fifteen folders"

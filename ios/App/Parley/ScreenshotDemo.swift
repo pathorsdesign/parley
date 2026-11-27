@@ -267,6 +267,12 @@
                 recordingID = "demo-review"
                 forcedTab = .delivery
                 showTranscript = true
+            case "delivery-group":
+                // 評分 on a four-person call: the speaker switch full.
+                tab = .library
+                recordingID = "demo-discovery"
+                forcedTab = .delivery
+                showTranscript = true
             case "jump":
                 // A moment in the summary, tapped: 回放 with that turn lit and
                 // the 💡 notes beside it.
@@ -775,6 +781,21 @@
             // Nobody marked as the user and no tone read: 評分 asks who is who.
             bare.raw["selfSpeaker"] = nil
             bare.raw["deliveryAssessment"] = nil
+            if id == "demo-discovery" {
+                // A four-way call (`delivery-group`): the same lines spread
+                // over four diarized speakers with no names, the user marked
+                // as B — what 評分's speaker switch looks like when it is full.
+                let pattern = [2, 1, 2, 3, 4, 1, 2, 3, 4, 2, 1, 3]
+                if let segments = bare.raw["segments"] as? [[String: Any]] {
+                    bare.raw["segments"] = segments.enumerated().map { index, seg in
+                        var seg = seg
+                        seg["speaker"] = pattern[index % pattern.count]
+                        return seg
+                    }
+                }
+                bare.raw["speakerNames"] = [String: String]()
+                bare.raw["selfSpeaker"] = "mix-2"
+            }
             return bare
         }
 

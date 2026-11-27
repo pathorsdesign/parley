@@ -9131,6 +9131,22 @@
         }
       }
     },
+    "Unassigned" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unassigned"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未指定"
+          }
+        }
+      }
+    },
     "Unfiled" : {
       "extractionState" : "manual",
       "localizations" : {

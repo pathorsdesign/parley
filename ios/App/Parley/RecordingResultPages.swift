@@ -91,10 +91,9 @@ struct SummaryPage: View {
 /// The action items, then the brief's forward-looking section — the desktop's
 /// 後續行動 tab: the same question, what happens after this meeting.
 ///
-/// Items that say whose they are render in two groups, 我們 first, then 對方
-/// (named after the folder the recording is filed in, which is the customer);
-/// items with no side — every one made before sides existed — keep one flat
-/// list.
+/// Grouped by whose they are: the user first, then each speaker who owns
+/// something, then people only named, then 未指定 — the speaker names
+/// follow a rename on 回放 (`RecordingMeta.actionItemsByOwner`).
 struct ActionsPage: View {
     let meta: RecordingMeta
     /// The folder's name, for 對方's heading. nil = unfiled.
@@ -126,75 +125,64 @@ struct ActionsPage: View {
 
     @ViewBuilder
     private var items: some View {
-        let all = meta.actionItems
-        if all.isEmpty {
+        let groups = meta.actionItemsByOwner
+        if groups.isEmpty {
             Text("No action items.")
                 .font(.parley.subheadline)
                 .foregroundStyle(Color(.secondaryLabel))
-        } else if all.contains(where: { $0.side != nil }) {
-            VStack(alignment: .leading, spacing: 20) {
-                group(.us, all.filter { $0.side != .them })
-                group(.them, all.filter { $0.side == .them })
-            }
         } else {
-            VStack(alignment: .leading, spacing: 0) {
-                ForEach(all) { row($0) }
+            VStack(alignment: .leading, spacing: 20) {
+                ForEach(groups) { group($0) }
             }
         }
     }
 
-    @ViewBuilder
-    private func group(_ side: RecordingMeta.ActionItem.Side, _ items: [RecordingMeta.ActionItem])
-        -> some View
-    {
-        if !items.isEmpty {
-            VStack(alignment: .leading, spacing: 0) {
-                HStack(spacing: 8) {
-                    Circle()
-                        .fill(side == .us ? Theme.primary : Color(.tertiaryLabel))
-                        .frame(width: 7, height: 7)
-                        .accessibilityHidden(true)
-                    sideName(side)
-                        .font(.parley.footnote.weight(.semibold))
-                        .foregroundStyle(Color(.label))
-                        .lineLimit(1)
-                    let owners = Self.owners(items)
-                    if !owners.isEmpty {
-                        Text(verbatim: owners.formatted(.list(type: .and)))
-                            .font(.parley.caption)
-                            .foregroundStyle(Color(.secondaryLabel))
-                            .lineLimit(1)
+    /// One owner's items under a header: a person mark (filled and tinted for
+    /// the user), the owner's name, the count.
+    private func group(_ group: RecordingMeta.ActionOwnerGroup) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 8) {
+                Image(systemName: icon(group.kind))
+                    .font(.parley.caption)
+                    .foregroundStyle(isSelf(group.kind) ? Theme.primary : Color(.secondaryLabel))
+                    .frame(width: 16)
+                    .accessibilityHidden(true)
+                Group {
+                    if let name = group.name {
+                        Text(verbatim: name)
+                    } else {
+                        Text("Unassigned")
                     }
-                    Spacer(minLength: 4)
-                    Text("\(items.count) items")
-                        .font(.parley.caption.monospacedDigit())
-                        .foregroundStyle(Color(.secondaryLabel))
                 }
-                .padding(.bottom, 6)
-                .overlay(alignment: .bottom) {
-                    Rectangle().fill(Color(.separator)).frame(height: 0.5)
-                }
-                .accessibilityElement(children: .combine)
-                .accessibilityAddTraits(.isHeader)
-                ForEach(items) { row($0) }
+                .font(.parley.footnote.weight(.semibold))
+                .foregroundStyle(Color(.label))
+                .lineLimit(1)
+                Spacer(minLength: 4)
+                Text("\(group.items.count) items")
+                    .font(.parley.caption.monospacedDigit())
+                    .foregroundStyle(Color(.secondaryLabel))
             }
+            .padding(.bottom, 6)
+            .overlay(alignment: .bottom) {
+                Rectangle().fill(Color(.separator)).frame(height: 0.5)
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityAddTraits(.isHeader)
+            ForEach(group.items) { row($0) }
         }
     }
 
-    private func sideName(_ side: RecordingMeta.ActionItem.Side) -> Text {
-        switch side {
-        case .us: return Text("Us")
-        case .them:
-            guard let folderName, !folderName.isEmpty else { return Text("Them") }
-            return Text("\(folderName) (them)")
-        }
+    private func isSelf(_ kind: RecordingMeta.ActionOwnerGroup.Kind) -> Bool {
+        if case .speaker(_, true) = kind { return true }
+        return false
     }
 
-    /// Who owns the items, in order of first appearance.
-    private static func owners(_ items: [RecordingMeta.ActionItem]) -> [String] {
-        var seen: [String] = []
-        for owner in items.compactMap(\.owner) where !seen.contains(owner) { seen.append(owner) }
-        return seen
+    private func icon(_ kind: RecordingMeta.ActionOwnerGroup.Kind) -> String {
+        switch kind {
+        case .speaker(_, let isSelf): isSelf ? "person.fill" : "person"
+        case .named: "person"
+        case .unassigned: "questionmark.circle"
+        }
     }
 
     private func row(_ item: RecordingMeta.ActionItem) -> some View {
@@ -207,11 +195,6 @@ struct ActionsPage: View {
                         .foregroundStyle(item.done ? Color(.secondaryLabel) : Color(.label))
                         .strikethrough(item.done, color: Color(.secondaryLabel))
                         .fixedSize(horizontal: false, vertical: true)
-                    if let owner = item.owner {
-                        Text(verbatim: owner)
-                            .font(.parley.caption)
-                            .foregroundStyle(Color(.secondaryLabel))
-                    }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 if let atMs = item.atMs {

@@ -265,6 +265,10 @@ public struct RecordingMeta: @unchecked Sendable {
         /// Who should do it, by the name the meeting used. nil when the
         /// transcript does not make it clear.
         public let owner: String?
+        /// The speaker key `owner` is, when the analysis tied it to one — so a
+        /// later rename of that speaker renames the owner (`ownerKey`,
+        /// speakers/owners.ts).
+        public let ownerKey: String?
 
         public enum Side: String, Sendable {
             case us, them
@@ -272,7 +276,7 @@ public struct RecordingMeta: @unchecked Sendable {
 
         public init(
             id: String, text: String, done: Bool, atMs: UInt64?, side: Side? = nil,
-            owner: String? = nil
+            owner: String? = nil, ownerKey: String? = nil
         ) {
             self.id = id
             self.text = text
@@ -280,6 +284,7 @@ public struct RecordingMeta: @unchecked Sendable {
             self.atMs = atMs
             self.side = side
             self.owner = owner
+            self.ownerKey = ownerKey
         }
     }
 
@@ -300,7 +305,8 @@ public struct RecordingMeta: @unchecked Sendable {
                 owner: (item["owner"] as? String).flatMap { owner in
                     let trimmed = owner.trimmingCharacters(in: .whitespacesAndNewlines)
                     return trimmed.isEmpty ? nil : trimmed
-                })
+                },
+                ownerKey: (item["ownerKey"] as? String).flatMap { $0.isEmpty ? nil : $0 })
         }
     }
 

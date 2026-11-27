@@ -71,12 +71,6 @@ struct DeliveryPage: View {
         let assessment = ownRead ? meta.deliveryAssessment : nil
         VStack(alignment: .leading, spacing: 28) {
             VStack(alignment: .leading, spacing: 12) {
-                if r.user == nil {
-                    Text(L("delivery.self.unknown"))
-                        .font(.parley.footnote)
-                        .foregroundStyle(Color(.secondaryLabel))
-                        .fixedSize(horizontal: false, vertical: true)
-                }
                 speakerSwitch(r)
                 kpis(r, assessment: assessment)
             }
@@ -181,19 +175,28 @@ struct DeliveryPage: View {
     }
 
     /// Who the speaker on screen is to Parley, and the one action that
-    /// changes it: undo the user's own mark, or 標記為我 — an outline button
-    /// either way, the desktop's.
+    /// changes it — the desktop's `Identity`, rule for rule:
+    /// - the user on screen: the menu's person mark already says so; all that
+    ///   is left is undoing a hand mark, a quiet 取消標記 (nothing for an
+    ///   automatic match);
+    /// - nobody is the user yet: 標記為我 is the page's question, so it is
+    ///   the outline button;
+    /// - someone else is the user: re-marking is a quieter correction, the
+    ///   same words without the border.
     @ViewBuilder
     private func identity(_ r: Report) -> some View {
-        if r.viewed.isSelf, let user = r.user {
-            // An automatic answer (the desktop's mic track) has nothing to undo.
-            if user.origin == .marked, meta.selfSpeaker == r.viewed.key {
-                OutlineButton(title: L("delivery.speaker.unmark"), icon: "person.slash") {
+        if r.viewed.isSelf, r.user != nil {
+            if meta.selfSpeaker == r.viewed.key {
+                GhostButton(title: L("delivery.speaker.unmark"), icon: nil) {
                     markSelf(nil)
                 }
             }
-        } else {
+        } else if r.user == nil {
             OutlineButton(title: L("delivery.speaker.markMe"), icon: "person") {
+                markSelf(r.viewed.key)
+            }
+        } else {
+            GhostButton(title: L("delivery.speaker.markMe"), icon: "person") {
                 markSelf(r.viewed.key)
             }
         }
@@ -561,6 +564,34 @@ private struct Stamp: View {
                     RoundedRectangle(cornerRadius: 4, style: .continuous)
                         .strokeBorder(Color(.separator), lineWidth: 0.5))
                 .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+/// The desktop's `Button variant="ghost"` in muted text: no border, no fill.
+private struct GhostButton: View {
+    let title: String
+    let icon: String?
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 5) {
+                if let icon {
+                    Image(systemName: icon)
+                        .font(.parley.caption)
+                        .accessibilityHidden(true)
+                }
+                Text(verbatim: title)
+                    .font(.parley.footnote)
+                    .lineLimit(1)
+            }
+            .fixedSize()
+            .foregroundStyle(Color(.secondaryLabel))
+            .padding(.horizontal, 8)
+            .padding(.vertical, 7)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }

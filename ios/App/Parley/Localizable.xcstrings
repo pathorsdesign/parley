@@ -10477,23 +10477,6 @@
         }
       }
     },
-    "delivery.self.unknown" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Which speaker is you? Open their tab and tap Mark as me."
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "哪一位講者是你？切到他那一頁，按「標記為我」。"
-          }
-        }
-      }
-    },
     "delivery.speaker.aria" : {
       "extractionState" : "manual",
       "localizations" : {

@@ -110,85 +110,74 @@ struct DeliveryPage: View {
     /// first, with a person mark. The one action for the speaker on screen sits
     /// at the row's far end, as the desktop's outline button.
     private func speakerSwitch(_ r: Report) -> some View {
-        // The desktop's row wraps: the switch and the action side by side when
-        // they fit, else the action drops under it. A switch wider than the
-        // page (a big call on a small phone) scrolls, its far edge fading.
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: 10) {
-                track(r).fixedSize()
-                Spacer(minLength: 0)
-                identity(r)
-            }
-            VStack(alignment: .leading, spacing: 10) {
-                ViewThatFits(in: .horizontal) {
-                    track(r).fixedSize()
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        track(r)
-                    }
-                    .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
-                    .mask(
-                        HStack(spacing: 0) {
-                            Color.black
-                            LinearGradient(
-                                colors: [.black, .clear], startPoint: .leading,
-                                endPoint: .trailing
-                            )
-                            .frame(width: 28)
-                        })
-                }
-                identity(r)
-            }
+        // A dropdown rather than the desktop's tabs: the report is nearly
+        // always read for the user, so the other speakers can wait behind one
+        // tap, and a big call never crowds the row or pushes the action down.
+        HStack(spacing: 10) {
+            speakerMenu(r)
+            Spacer(minLength: 0)
+            identity(r)
         }
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel(Text(L("delivery.speaker.aria")))
     }
 
-    /// The grey track with one segment per speaker.
-    private func track(_ r: Report) -> some View {
+    private func share(_ entry: DeliverySpeakers.RosterEntry, of r: Report) -> Int {
         let total = r.roster.reduce(0) { $0 + $1.talkMs }
-        return HStack(spacing: 2) {
-            ForEach(r.roster) { entry in
-                segment(entry, active: entry.key == r.viewed.key, total: total)
-            }
-        }
-        .padding(3)
-        .background(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(Color(.tertiarySystemFill)))
+        return total > 0 ? Int((Double(entry.talkMs) / Double(total) * 100).rounded()) : 0
     }
 
-    private func segment(_ entry: DeliverySpeakers.RosterEntry, active: Bool, total: Int) -> some View {
-        let share = total > 0 ? Int((Double(entry.talkMs) / Double(total) * 100).rounded()) : 0
-        return Button {
-            picked = entry.key
+    /// The speaker on screen, as the outline button's shape with a chevron;
+    /// the menu lists everyone with their share of the talk, the user first
+    /// with a person mark, the one on screen ticked.
+    private func speakerMenu(_ r: Report) -> some View {
+        Menu {
+            Picker(
+                selection: Binding(get: { r.viewed.key }, set: { picked = $0 })
+            ) {
+                ForEach(r.roster) { entry in
+                    let text = "\(label(entry))  \(share(entry, of: r))%"
+                    Group {
+                        if entry.isSelf {
+                            Label(text, systemImage: "person")
+                        } else {
+                            Text(verbatim: text)
+                        }
+                    }
+                    .tag(entry.key)
+                }
+            } label: {
+                Text(L("delivery.speaker.aria"))
+            }
+            .pickerStyle(.inline)
         } label: {
             HStack(spacing: 5) {
-                if entry.isSelf {
+                if r.viewed.isSelf {
                     Image(systemName: "person")
                         .font(.parley.caption)
                         .accessibilityLabel(Text(L("delivery.speaker.me")))
                 }
-                Text(verbatim: label(entry))
-                    .font(.parley.footnote.weight(active ? .medium : .regular))
+                Text(verbatim: label(r.viewed))
+                    .font(.parley.footnote.weight(.medium))
                     .lineLimit(1)
-                Text(verbatim: "\(share)%")
+                Text(verbatim: "\(share(r.viewed, of: r))%")
                     .font(.parley.footnote.monospacedDigit())
                     .foregroundStyle(Color(.secondaryLabel))
+                Image(systemName: "chevron.down")
+                    .font(.parley.caption2.weight(.semibold))
+                    .foregroundStyle(Color(.secondaryLabel))
+                    .accessibilityHidden(true)
             }
-            .foregroundStyle(active ? Color(.label) : Color(.secondaryLabel))
+            .foregroundStyle(Color(.label))
             .padding(.horizontal, 10)
-            .frame(minHeight: 30)
-            .background {
-                if active {
-                    RoundedRectangle(cornerRadius: 7, style: .continuous)
-                        .fill(Color(.systemBackground))
-                        .shadow(color: .black.opacity(0.08), radius: 1.5, y: 1)
-                }
-            }
+            .padding(.vertical, 7)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(Color(.systemBackground)))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .strokeBorder(Color(.separator), lineWidth: 0.5))
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
-        .accessibilityAddTraits(active ? [.isSelected, .isButton] : .isButton)
+        .accessibilityLabel(Text(L("delivery.speaker.aria")))
     }
 
     /// Who the speaker on screen is to Parley, and the one action that

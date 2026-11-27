@@ -287,8 +287,11 @@ struct RecordingDetailView: View {
             // menu before AskYourAi on some opens.
             ToolbarItemGroup(placement: .topBarTrailing) {
                 searchButton
-                askYourAI
-                moreMenu
+                // One item, so the two sit closer than the bar's own spacing.
+                HStack(spacing: 6) {
+                    askYourAI
+                    moreMenu
+                }
             }
         }
         .sheet(isPresented: $sharingToAI) {
@@ -510,7 +513,7 @@ struct RecordingDetailView: View {
         LucidePlug()
             // lucide's 2 of 24 units, at this size.
             .stroke(style: StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round))
-            .frame(width: 18, height: 18)
+            .frame(width: 21, height: 21)
     }
 
     private var moreMenu: some View {

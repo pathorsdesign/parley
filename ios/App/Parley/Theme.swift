@@ -38,10 +38,10 @@ enum Theme {
     static let warning = Color(.systemOrange)
     static let success = Color(.systemGreen)
     /// Large warning text standing on its own — a number that warrants a
-    /// look, with no wash behind it: the desktop's `--warning-text`
-    /// (oklch 0.69 0.105 63 light, 0.76 0.08 66 dark), a muted amber that sits
-    /// with the greys where the system orange shouts.
-    static let warningText = adaptive(0xC98C53, 0xD4A77A)
+    /// look, with no wash behind it. Warmer than the desktop's `--warning-text`
+    /// (which reads brown on a phone): oklch 0.70 0.15 55 light, 0.78 0.13 60
+    /// dark — orange, but softer than the system orange.
+    static let warningText = adaptive(0xE48233, 0xF4A25C)
 
     /// The microphone window (see `MicWindow`). Deliberately **iOS's own orange
     /// privacy indicator** rather than a Parley token: while a window is open

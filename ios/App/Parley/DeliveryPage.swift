@@ -374,7 +374,7 @@ struct DeliveryPage: View {
 
 /// Chart marks are grey only, as on the desktop: emphasis, then normal.
 private enum Mark {
-    static let strong = Color(.label).opacity(0.75)
+    static let strong = Color(.systemGray)
     static let normal = Color(.systemGray3)
 }
 

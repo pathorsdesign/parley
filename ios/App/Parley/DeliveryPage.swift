@@ -110,25 +110,51 @@ struct DeliveryPage: View {
     /// first, with a person mark. The one action for the speaker on screen sits
     /// at the row's far end, as the desktop's outline button.
     private func speakerSwitch(_ r: Report) -> some View {
-        let total = r.roster.reduce(0) { $0 + $1.talkMs }
-        return HStack(spacing: 10) {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 2) {
-                    ForEach(r.roster) { entry in
-                        segment(entry, active: entry.key == r.viewed.key, total: total)
-                    }
-                }
-                .padding(3)
-                .background(
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .fill(Color(.tertiarySystemFill)))
+        // The desktop's row wraps: the switch and the action side by side when
+        // they fit, else the action drops under it. A switch wider than the
+        // page (a big call on a small phone) scrolls, its far edge fading.
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 10) {
+                track(r).fixedSize()
+                Spacer(minLength: 0)
+                identity(r)
             }
-            .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
-            .fixedSize(horizontal: false, vertical: true)
-            .accessibilityElement(children: .contain)
-            .accessibilityLabel(Text(L("delivery.speaker.aria")))
-            identity(r)
+            VStack(alignment: .leading, spacing: 10) {
+                ViewThatFits(in: .horizontal) {
+                    track(r).fixedSize()
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        track(r)
+                    }
+                    .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
+                    .mask(
+                        HStack(spacing: 0) {
+                            Color.black
+                            LinearGradient(
+                                colors: [.black, .clear], startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                            .frame(width: 28)
+                        })
+                }
+                identity(r)
+            }
         }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(Text(L("delivery.speaker.aria")))
+    }
+
+    /// The grey track with one segment per speaker.
+    private func track(_ r: Report) -> some View {
+        let total = r.roster.reduce(0) { $0 + $1.talkMs }
+        return HStack(spacing: 2) {
+            ForEach(r.roster) { entry in
+                segment(entry, active: entry.key == r.viewed.key, total: total)
+            }
+        }
+        .padding(3)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Color(.tertiarySystemFill)))
     }
 
     private func segment(_ entry: DeliverySpeakers.RosterEntry, active: Bool, total: Int) -> some View {

@@ -472,15 +472,16 @@ struct RecordingDetailView: View {
         Button {
             sharingToAI = true
         } label: {
-            HStack(spacing: 4) {
-                Image(systemName: "sparkles")
-                    .font(.parley.caption.weight(.semibold))
+            // Drawn like the ··· beside it: a toolbar glyph in the bar's
+            // tint, with its words. The plug is the desktop's (lucide `Plug`).
+            HStack(spacing: 5) {
+                Image(systemName: "powerplug")
                     .accessibilityHidden(true)
                 Text("Hand it to your AI")
-                    .font(.parley.footnote.weight(.semibold))
+                    .font(.parley.subheadline)
                     .lineLimit(1)
+                    .fixedSize()
             }
-            .fixedSize()
         }
         .disabled(readable.isEmpty)
     }
@@ -497,28 +498,24 @@ struct RecordingDetailView: View {
     /// Download, re-transcribe and delete are personal-scope only: they go
     /// through the personal recording endpoints, so an org recording read on
     /// this phone is offered copy and (within its organization) move.
+    /// What 複製 copies on the open tab: its page, or on 回放 the transcript.
+    private func openTabCopyText() -> String? {
+        if tab == .replay { return readable.isEmpty ? nil : plainTranscript() }
+        return pageText()
+    }
+
     private var moreMenu: some View {
         Menu {
-            Section {
-                if tab != .replay, let page = pageText() {
+            // One copy: the open tab's. The transcript with the analysis
+            // prompt is what 交給你的 AI hands over, so it is not repeated here.
+            if let copyText = openTabCopyText() {
+                Section {
                     Button {
-                        copy(page)
+                        copy(copyText)
                     } label: {
                         Label(copyPageLabel, systemImage: "doc.on.doc")
                     }
                 }
-                Button {
-                    copy(plainTranscript())
-                } label: {
-                    Label("Copy transcript", systemImage: "text.quote")
-                }
-                .disabled(readable.isEmpty)
-                Button {
-                    if copy(handoffText()) { GettingStartedStore.shared.mark(.sharedToAI) }
-                } label: {
-                    Label("Copy transcript with analysis prompt", systemImage: "doc.on.clipboard")
-                }
-                .disabled(readable.isEmpty)
             }
             Section {
                 downloadItem
@@ -2123,3 +2120,4 @@ struct RecordingDetailView: View {
         return String(format: "%d:%02d", s / 60, s % 60)
     }
 }
+

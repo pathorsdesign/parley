@@ -218,10 +218,14 @@ struct FilingRow: View {
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Image(systemName: orgName == nil ? "folder" : "person.2")
-                .font(.parley.footnote)
-                .foregroundStyle(Color(.secondaryLabel))
-                .accessibilityHidden(true)
+            // Filed: the glyph rides inside each pill, with the name it marks.
+            // Unfiled: it leads the row, before the suggestion or the prompt.
+            if orgName == nil && folderName == nil {
+                Image(systemName: "folder")
+                    .font(.parley.footnote)
+                    .foregroundStyle(Color(.secondaryLabel))
+                    .accessibilityHidden(true)
+            }
             FlowLayout(spacing: 8, lineSpacing: 8) {
                 content
             }
@@ -250,11 +254,11 @@ struct FilingRow: View {
     @ViewBuilder
     private var content: some View {
         if let orgName {
-            pill(Text(verbatim: orgName), tinted: true)
-            if let folderName { pill(Text(verbatim: folderName), tinted: false) }
+            pill(Text(verbatim: orgName), tinted: true, icon: "person.2")
+            if let folderName { pill(Text(verbatim: folderName), tinted: false, icon: "folder") }
             if movable { textButton(Text("Change"), action: openPicker) }
         } else if let folderName {
-            pill(Text(verbatim: folderName), tinted: false)
+            pill(Text(verbatim: folderName), tinted: false, icon: "folder")
             if movable { textButton(Text("Change"), action: openPicker) }
         } else if offering {
             Text("File under")
@@ -328,10 +332,16 @@ struct FilingRow: View {
     }
 
     /// Where it is filed: a quiet capsule, the desktop's folder pill.
-    private func pill(_ text: Text, tinted: Bool) -> some View {
-        text
-            .font(.parley.footnote.weight(.medium))
-            .lineLimit(1)
+    private func pill(_ text: Text, tinted: Bool, icon: String) -> some View {
+        HStack(spacing: 5) {
+            Image(systemName: icon)
+                .font(.parley.caption)
+                .foregroundStyle(tinted ? Theme.primary : Color(.secondaryLabel))
+                .accessibilityHidden(true)
+            text
+                .font(.parley.footnote.weight(.medium))
+                .lineLimit(1)
+        }
             .foregroundStyle(tinted ? Theme.primary : Color(.label))
             .padding(.horizontal, 10)
             .frame(minHeight: 26)

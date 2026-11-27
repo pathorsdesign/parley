@@ -233,6 +233,9 @@ struct RecordingDetailView: View {
     /// When it lands the chips ask what was wrong with the one it replaced.
     @State private var awaitingReTranscribe = false
     @State private var showsReTranscribeChips = false
+    /// The speaker whose name is being edited (tapped on 回放), and the draft.
+    @State private var renamingSpeaker: TranscriptSegment?
+    @State private var speakerNameDraft = ""
 
     init(
         summary: CloudRecordingSummary, orgId: String?, intent: Intent = .read,
@@ -334,6 +337,11 @@ struct RecordingDetailView: View {
             .onReceive(ScreenshotDemo.shared.$openFilingAdjust) { open in
                 if open { choosingFolder = true }
             }
+            .onReceive(ScreenshotDemo.shared.$openSpeakerRename) { open in
+                guard open, let seg = readable.first else { return }
+                speakerNameDraft = meta?.speakerNames[RecordingMeta.speakerKey(seg)] ?? ""
+                renamingSpeaker = seg
+            }
         #endif
         .confirmationDialog(
             "Delete this recording?",
@@ -351,6 +359,15 @@ struct RecordingDetailView: View {
             isPresented: Binding(get: { deleteError != nil }, set: { if !$0 { deleteError = nil } })
         ) {
             Button("OK", role: .cancel) {}
+        }
+        .alert(
+            "Rename speaker",
+            isPresented: Binding(
+                get: { renamingSpeaker != nil }, set: { if !$0 { renamingSpeaker = nil } })
+        ) {
+            renameSpeakerFields
+        } message: {
+            Text("Every line of this speaker takes the new name.")
         }
         .confirmationDialog(
             "Re-transcribe this recording?",
@@ -954,6 +971,46 @@ struct RecordingDetailView: View {
         }
     }
 
+    /// The rename prompt's field and buttons. The placeholder is the label the
+    /// speaker falls back to, so an emptied field says what it will read.
+    @ViewBuilder
+    private var renameSpeakerFields: some View {
+        if let seg = renamingSpeaker, let meta {
+            var unnamed = meta
+            let _ = unnamed.setSpeakerName(RecordingMeta.speakerKey(seg), to: "")
+            TextField(unnamed.speakerLabel(for: seg), text: $speakerNameDraft)
+            Button("Cancel", role: .cancel) {}
+            Button("Save") { renameSpeaker(RecordingMeta.speakerKey(seg), to: speakerNameDraft) }
+        }
+    }
+
+    /// The desktop's `setSpeakerName`: on the screen at once; a personal
+    /// recording also writes it to the meta — read-modify-write like the self
+    /// mark, so nothing the Mac changed meanwhile is lost. The sample, the demo
+    /// and an organization's recordings keep the name on the screen only.
+    private func renameSpeaker(_ key: String, to name: String) {
+        guard meta?.setSpeakerName(key, to: name) == true else { return }
+        guard orgId == nil, !isSample else { return }
+        #if DEBUG
+            if ScreenshotDemo.servesFixtures { return }
+        #endif
+        let id = summary.id
+        let fallback = summary
+        let cloud = app.cloud
+        Task {
+            do {
+                var fresh = try await cloud.recordingMeta(id: id)
+                guard fresh.setSpeakerName(key, to: name) else { return }
+                try await cloud.pushRecording(
+                    id: id, summary: CloudRecordingSummary(projecting: fresh, fallback: fallback),
+                    meta: fresh)
+            } catch {
+                Self.log.warning(
+                    "saving a speaker name failed: \(error.localizedDescription, privacy: .public)")
+            }
+        }
+    }
+
     /// 標記為我 on the 評分 tab: the desktop's `markSelfSpeaker`. The mark is
     /// kept on the screen at once; a personal recording also writes it to the
     /// meta (a read-modify-write, so nothing the Mac changed meanwhile is lost)
@@ -1414,9 +1471,19 @@ struct RecordingDetailView: View {
     ) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 8) {
-                Text(verbatim: meta.speakerLabel(for: seg))
-                    .font(.parley.footnote.weight(.semibold))
-                    .foregroundStyle(isCurrent ? Theme.primary : Color(.secondaryLabel))
+                // The desktop's speaker badge: tapping it renames the speaker
+                // (every one of their lines at once); it does not seek.
+                Button {
+                    speakerNameDraft = meta.speakerNames[RecordingMeta.speakerKey(seg)] ?? ""
+                    renamingSpeaker = seg
+                } label: {
+                    Text(verbatim: meta.speakerLabel(for: seg))
+                        .font(.parley.footnote.weight(.semibold))
+                        .foregroundStyle(isCurrent ? Theme.primary : Color(.secondaryLabel))
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityHint(Text("Tap to rename the speaker"))
                 // The timecode is the way into the audio from the text. A plain
                 // tertiary numeral rather than a tinted control: it is one of
                 // dozens on the screen, and colouring every one of them blue

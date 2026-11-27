@@ -69,6 +69,8 @@
         /// first — set from the route it can open onto a page that has not
         /// loaded its folders yet.
         @Published var openFilingAdjust = false
+        /// `rename-speaker`: 回放's rename prompt, opened on the first turn.
+        @Published var openSpeakerRename = false
         /// The transcript opens the folder picker over `pickerFolders`.
         @Published var openFolderPicker = false
         /// Settings runs its "Show the getting-started list again" action, the
@@ -199,6 +201,7 @@
             showIdleRecord = false
             showPausedMeeting = false
             openFilingAdjust = false
+            openSpeakerRename = false
             wantsFilingAdjust = false
             openFolderPicker = false
             pressResetChecklist = false
@@ -267,6 +270,16 @@
                 recordingID = "demo-review"
                 forcedTab = .delivery
                 showTranscript = true
+            case "rename-speaker":
+                // 回放 with the rename prompt up on the first speaker, opened
+                // with nobody tapping — `simctl` cannot tap.
+                tab = .library
+                forcedTab = .replay
+                showTranscript = true
+                Task { @MainActor in
+                    try? await Task.sleep(for: .milliseconds(1500))
+                    self.openSpeakerRename = true
+                }
             case "delivery-group":
                 // 評分 on a four-person call: the speaker switch full.
                 tab = .library

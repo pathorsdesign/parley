@@ -2521,6 +2521,22 @@
         }
       }
     },
+    "Every line of this speaker takes the new name." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Every line of this speaker takes the new name."
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "這位講者的每一句都會換成新名字。"
+          }
+        }
+      }
+    },
     "Every recording gets a name and a suggested folder. Tap the name to change it, or pick your own folder. Try any suggested folder above." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -6466,6 +6482,22 @@
         }
       }
     },
+    "Rename speaker" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rename speaker"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "更改講者名稱"
+          }
+        }
+      }
+    },
     "Renamed and filed in “%@”. Every recording will do this from now on." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -8178,6 +8210,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "點一下可以改標題"
+          }
+        }
+      }
+    },
+    "Tap to rename the speaker" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tap to rename the speaker"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "點一下可以改講者名稱"
           }
         }
       }

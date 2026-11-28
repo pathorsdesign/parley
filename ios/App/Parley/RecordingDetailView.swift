@@ -634,10 +634,11 @@ struct RecordingDetailView: View {
                 .filter { !$0.isEmpty }.joined(separator: "\n\n")
         case .actions:
             // As the page groups them: each owner's name on its own line, their
-            // items one per line under it, a blank line between owners — plain
-            // text that pastes cleanly into a chat or a note.
+            // items numbered under it from 1, a blank line between owners —
+            // plain text that pastes cleanly into a chat or a note.
             text = meta.actionItemsByOwner.map { group in
-                ([group.name ?? String(localized: "Unassigned")] + group.items.map(\.text))
+                let items = group.items.enumerated().map { "\($0.offset + 1). \($0.element.text)" }
+                return ([group.name ?? String(localized: "Unassigned")] + items)
                     .joined(separator: "\n")
             }
             .joined(separator: "\n\n")

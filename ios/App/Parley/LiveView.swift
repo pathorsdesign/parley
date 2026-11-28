@@ -1280,7 +1280,6 @@ struct LiveView: View {
                     title: start.title, folder: start.folder)
                 recorder.meetingContext = start.context
                 recorder.meetingDraft = (start.draft, start.folderName)
-        recorder.agenda = start.draft.todos.map(AgendaItem.init)
                 recorder.agenda = start.draft.todos.map(AgendaItem.init)
                 router.markDraftStarted(start.draftId)
                 return

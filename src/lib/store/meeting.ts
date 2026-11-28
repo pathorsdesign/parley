@@ -5,6 +5,7 @@ import type { MeetingStatus } from "../types";
 import { log } from "../log";
 import { CLEARED_STUDY_SLICE } from "./study";
 import type { ParleyState, SliceCreator, TranscriptionLink } from "./types";
+import type { TranscriptionRefusal } from "../ipc/events";
 
 export interface MeetingSlice {
   meetingStatus: MeetingStatus;
@@ -72,6 +73,11 @@ export interface MeetingSlice {
    *  `transcriptionLink` live, so the silence guard still ends a meeting
    *  nothing is being captured in. */
   transcriptionNoAudioSources: string[];
+  /** Set while the link is reconnecting because Parley Cloud REFUSED the
+   *  session ("auth" / "quota") rather than the network dropping it. The
+   *  backend keeps redialling (slowly) for the whole meeting; the banner says
+   *  why the transcript stopped and that the recording is safe (#728). */
+  transcriptionRefusedReason: TranscriptionRefusal | null;
   /** Record a `meeting://transcription` `no_audio` report from `source`.
    *  Ignored outside an active meeting. */
   reportTranscriptionNoAudio: (source: string) => void;
@@ -80,7 +86,7 @@ export interface MeetingSlice {
    *  teardown must not raise the banner over a finished call), and a "live"
    *  from a source that never reported reconnecting — every leg's FIRST
    *  handshake also reports live — is a no-op. */
-  reportTranscriptionLink: (source: string, state: TranscriptionLink) => void;
+  reportTranscriptionLink: (source: string, state: TranscriptionLink, reason?: TranscriptionRefusal | null) => void;
 
   /** When the silence guard asked "is this meeting over?" (epoch ms), null
    *  while it isn't asking. Drives the live screen's countdown banner; the
@@ -120,11 +126,12 @@ export interface MeetingSlice {
  */
 const CLEARED_TRANSCRIPTION_LINK: Pick<
   ParleyState,
-  "transcriptionLink" | "transcriptionReconnectingSources" | "transcriptionNoAudioSources"
+  "transcriptionLink" | "transcriptionReconnectingSources" | "transcriptionNoAudioSources" | "transcriptionRefusedReason"
 > = {
   transcriptionLink: "live",
   transcriptionReconnectingSources: [],
   transcriptionNoAudioSources: [],
+  transcriptionRefusedReason: null,
 };
 
 /**
@@ -156,6 +163,7 @@ function foldTranscriptionLink(
   state: ParleyState,
   source: string,
   linkState: TranscriptionLink,
+  reason: TranscriptionRefusal | null = null,
 ): Partial<ParleyState> {
   if (!isMeetingActive(state.meetingStatus)) return {};
   const pending = state.transcriptionReconnectingSources;
@@ -169,6 +177,7 @@ function foldTranscriptionLink(
       ...noAudio,
       transcriptionLink: "reconnecting",
       transcriptionDropped: true,
+      transcriptionRefusedReason: reason,
       // Re-reported on every redial attempt while offline: keep one entry.
       transcriptionReconnectingSources: pending.includes(source) ? pending : [...pending, source],
     };
@@ -179,6 +188,7 @@ function foldTranscriptionLink(
     ...noAudio,
     transcriptionReconnectingSources: rest,
     transcriptionLink: rest.length === 0 ? "live" : "reconnecting",
+    ...(rest.length === 0 ? { transcriptionRefusedReason: null } : {}),
   };
 }
 
@@ -201,8 +211,8 @@ export const createMeetingSlice: SliceCreator<MeetingSlice> = (set) => ({
     set({ transcriptionDropped: true });
   },
   setSystemAudioWarning: (systemAudioWarning) => set({ systemAudioWarning }),
-  reportTranscriptionLink: (source, linkState) =>
-    set((state) => foldTranscriptionLink(state, source, linkState)),
+  reportTranscriptionLink: (source, linkState, reason) =>
+    set((state) => foldTranscriptionLink(state, source, linkState, reason ?? null)),
   reportTranscriptionNoAudio: (source) =>
     set((state) => {
       if (!isMeetingActive(state.meetingStatus)) return {};

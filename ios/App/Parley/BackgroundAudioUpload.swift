@@ -33,8 +33,10 @@ final class BackgroundAudioUpload: NSObject, @unchecked Sendable {
 
     private let lock = NSLock()
     private var session: URLSession!
-    /// Continuations waiting on a transfer, by recording id.
-    private var waiters: [String: [UUID: CheckedContinuation<Void, Error>]] = [:]
+    /// Continuations waiting on a transfer, by the task's `taskDescription`
+    /// (a whole recording's audio, or one part of a multipart upload). Each
+    /// is resumed with the server's answer body.
+    private var waiters: [String: [UUID: CheckedContinuation<Data, Error>]] = [:]
     /// What the server said, collected as it arrives, by task identifier.
     /// Capped: the only bodies this code reads are error messages.
     private var bodies: [Int: Data] = [:]
@@ -102,29 +104,48 @@ final class BackgroundAudioUpload: NSObject, @unchecked Sendable {
     ///
     /// The caller has already checked the manifest's `audioUploadedAt`.
     func upload(id: String, fileURL: URL, request: URLRequest, bytes: Int) async throws {
+        _ = try await transfer(
+            description: BackgroundUploadPlan.taskDescription(forRecording: id),
+            fileURL: fileURL, request: request, bytes: bytes)
+    }
+
+    /// One part of a multipart upload (parley#755), as its own background
+    /// transfer of `fileURL` (the part's bytes, already cut out of the Ogg).
+    /// Returns the server's answer body, which carries the part's etag. The
+    /// delegate has written the etag onto the queue entry by the time this
+    /// returns (`MeetingUploader.markPartUploaded`), exactly as a whole-audio
+    /// transfer is written down before anyone hears about it.
+    func uploadPart(
+        id: String, uploadId: String, part: Int, fileURL: URL, request: URLRequest, bytes: Int
+    ) async throws -> Data {
+        try await transfer(
+            description: MultipartUploadPlan.taskDescription(recording: id, uploadId: uploadId, part: part),
+            fileURL: fileURL, request: request, bytes: bytes)
+    }
+
+    /// Start (or attach to) the background transfer named `description` and
+    /// wait for it.
+    private func transfer(
+        description: String, fileURL: URL, request: URLRequest, bytes: Int
+    ) async throws -> Data {
         activate()
         await restored?.value
         let live = await liveTasks()
-        let action = BackgroundUploadPlan.action(
-            forRecording: id, audioAlreadyUploaded: false,
-            liveTasks: live.map { ($0.taskIdentifier, $0.taskDescription) })
+        let key = description
 
         let task: URLSessionTask
-        switch action {
-        case .skipAlreadyUploaded:
-            return
-        case .attach(let identifier):
-            guard let existing = live.first(where: { $0.taskIdentifier == identifier }) else {
-                throw StillUploading()
-            }
-            AppLog.sync.info("upload \(id, privacy: .public) already in flight, attaching")
+        let isNew: Bool
+        if let existing = live.first(where: { $0.taskDescription == description }) {
+            AppLog.sync.info("upload \(description, privacy: .public) already in flight, attaching")
             task = existing
-        case .start:
+            isNew = false
+        } else {
             let created = session.uploadTask(with: request, fromFile: fileURL)
-            created.taskDescription = BackgroundUploadPlan.taskDescription(forRecording: id)
+            created.taskDescription = description
             created.countOfBytesClientExpectsToSend = Int64(bytes)
             created.countOfBytesClientExpectsToReceive = 4_096
             task = created
+            isNew = true
         }
 
         let token = UUID()
@@ -147,31 +168,31 @@ final class BackgroundAudioUpload: NSObject, @unchecked Sendable {
                     now: Date(), startedAt: startedAt, lastProgressAt: lastProgressAt,
                     overallLimit: overallLimit)
                 {
-                    self?.resume(id: id, token: token, with: .failure(StillUploading()))
+                    self?.resume(key: key, token: token, with: .failure(StillUploading()))
                     return
                 }
             }
         }
         defer { watchdog.cancel() }
 
-        try await withTaskCancellationHandler {
-            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Data, Error>) in
                 lock.lock()
-                waiters[id, default: [:]][token] = continuation
+                waiters[key, default: [:]][token] = continuation
                 lock.unlock()
                 // Resumed after registering, so a transfer that finishes at
                 // once cannot complete before anyone is listening.
-                if case .start = action { task.resume() }
+                if isNew { task.resume() }
                 // Cancelled before the continuation existed: `onCancel` had
                 // nothing to resume, so let the caller go here.
                 if Task.isCancelled {
-                    resume(id: id, token: token, with: .failure(StillUploading()))
+                    resume(key: key, token: token, with: .failure(StillUploading()))
                 }
             }
         } onCancel: {
             // The caller is gone — the transfer is not. Never cancel the task
             // here: that is the whole point of handing it to the system.
-            self.resume(id: id, token: token, with: .failure(StillUploading()))
+            self.resume(key: key, token: token, with: .failure(StillUploading()))
         }
     }
 
@@ -180,7 +201,9 @@ final class BackgroundAudioUpload: NSObject, @unchecked Sendable {
     func cancel(id: String) async {
         guard session != nil else { return }
         for task in await liveTasks()
-        where BackgroundUploadPlan.recordingId(fromTaskDescription: task.taskDescription) == id {
+        where BackgroundUploadPlan.recordingId(fromTaskDescription: task.taskDescription) == id
+            || MultipartUploadPlan.partTask(fromTaskDescription: task.taskDescription)?.recordingId == id
+        {
             task.cancel()
         }
     }
@@ -189,18 +212,18 @@ final class BackgroundAudioUpload: NSObject, @unchecked Sendable {
         await session.allTasks.filter { $0.state == .running || $0.state == .suspended }
     }
 
-    private func resume(id: String, token: UUID, with result: Result<Void, Error>) {
+    private func resume(key: String, token: UUID, with result: Result<Data, Error>) {
         lock.lock()
-        let continuation = waiters[id]?.removeValue(forKey: token)
-        if waiters[id]?.isEmpty == true { waiters[id] = nil }
+        let continuation = waiters[key]?.removeValue(forKey: token)
+        if waiters[key]?.isEmpty == true { waiters[key] = nil }
         lock.unlock()
         continuation?.resume(with: result)
     }
 
-    /// Resume everyone waiting on `id`; false if nobody was.
-    private func resumeAll(id: String, with result: Result<Void, Error>) -> Bool {
+    /// Resume everyone waiting on the transfer `key`; false if nobody was.
+    private func resumeAll(key: String, with result: Result<Data, Error>) -> Bool {
         lock.lock()
-        let pending = waiters.removeValue(forKey: id) ?? [:]
+        let pending = waiters.removeValue(forKey: key) ?? [:]
         lock.unlock()
         pending.values.forEach { $0.resume(with: result) }
         return !pending.isEmpty
@@ -220,12 +243,17 @@ extension BackgroundAudioUpload: URLSessionDataDelegate {
         lock.lock()
         let body = bodies.removeValue(forKey: task.taskIdentifier) ?? Data()
         lock.unlock()
-        guard let id = BackgroundUploadPlan.recordingId(fromTaskDescription: task.taskDescription)
-        else { return }
         let http = task.response as? HTTPURLResponse
         let outcome = BackgroundUploadPlan.outcome(
             httpStatus: http?.statusCode, body: body,
             retryAfterHeader: http?.value(forHTTPHeaderField: "Retry-After"), error: error)
+        if let part = MultipartUploadPlan.partTask(fromTaskDescription: task.taskDescription) {
+            partCompleted(part, key: task.taskDescription ?? "", outcome: outcome, body: body)
+            return
+        }
+        guard let description = task.taskDescription,
+            let id = BackgroundUploadPlan.recordingId(fromTaskDescription: description)
+        else { return }
 
         switch outcome {
         case .uploaded:
@@ -234,12 +262,12 @@ extension BackgroundAudioUpload: URLSessionDataDelegate {
             MeetingUploader.markAudioUploaded(id: id)
             AppLog.sync.info("upload \(id, privacy: .public) audio landed (background session)")
             DiagnosticsJournal.record("sync_audio_landed_background", "background audio upload finished")
-            if !resumeAll(id: id, with: .success(())) {
+            if !resumeAll(key: description, with: .success(body)) {
                 onUploadedWithoutWaiter?(id)
             }
         case .refused(let status, let message, let retryAfter):
             let failure = CloudError(status: status, message: message, retryAfter: retryAfter)
-            if !resumeAll(id: id, with: .failure(failure)) {
+            if !resumeAll(key: description, with: .failure(failure)) {
                 // Nobody to count it, so count it here: it was an attempt, and
                 // a refusal has to reach the parking ladder either way.
                 MeetingUploader.noteBackgroundFailure(id: id, error: failure)
@@ -249,7 +277,48 @@ extension BackgroundAudioUpload: URLSessionDataDelegate {
             AppLog.sync.error(
                 "upload \(id, privacy: .public) background transfer ended: \(code, privacy: .public) forceQuit=\(forceQuit, privacy: .public)"
             )
-            if !resumeAll(id: id, with: .failure(failure)), !forceQuit {
+            if !resumeAll(key: description, with: .failure(failure)), !forceQuit {
+                MeetingUploader.noteBackgroundFailure(id: id, error: failure)
+            }
+        }
+    }
+
+    /// A part of a multipart upload finished. Its etag is written onto the
+    /// queue entry first, whoever is listening; with nobody listening (the
+    /// app was relaunched for it) the next pass is started, which sends the
+    /// next part or completes the upload.
+    private func partCompleted(
+        _ part: MultipartUploadPlan.PartTask, key: String,
+        outcome: BackgroundUploadPlan.Outcome, body: Data
+    ) {
+        let id = part.recordingId
+        switch outcome {
+        case .uploaded:
+            guard let etag = MultipartUploadPlan.etag(fromPartResponse: body) else {
+                let failure = CloudError(status: 0, message: "bad_part_response")
+                if !resumeAll(key: key, with: .failure(failure)) {
+                    MeetingUploader.noteBackgroundFailure(id: id, error: failure)
+                }
+                return
+            }
+            MeetingUploader.markPartUploaded(
+                id: id, uploadId: part.uploadId, part: part.part, etag: etag)
+            AppLog.sync.info(
+                "upload \(id, privacy: .public) part \(part.part, privacy: .public) landed (background session)")
+            if !resumeAll(key: key, with: .success(body)) {
+                onUploadedWithoutWaiter?(id)
+            }
+        case .refused(let status, let message, let retryAfter):
+            let failure = CloudError(status: status, message: message, retryAfter: retryAfter)
+            if !resumeAll(key: key, with: .failure(failure)) {
+                MeetingUploader.noteBackgroundPartFailure(id: id, uploadId: part.uploadId, error: failure)
+            }
+        case .transportFailed(let code, let forceQuit):
+            let failure = URLError(URLError.Code(rawValue: code))
+            AppLog.sync.error(
+                "upload \(id, privacy: .public) part \(part.part, privacy: .public) transfer ended: \(code, privacy: .public)"
+            )
+            if !resumeAll(key: key, with: .failure(failure)), !forceQuit {
                 MeetingUploader.noteBackgroundFailure(id: id, error: failure)
             }
         }

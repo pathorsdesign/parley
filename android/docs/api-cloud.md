@@ -76,6 +76,10 @@ All methods are `suspend` and throw `CloudException` on a non-2xx response.
 | `recordingMeta(id): RecordingMeta` | `GET /recordings/{id}/meta` |
 | `downloadAudio(id, destination: File)` | `GET /recordings/{id}/audio`, streamed to disk via a `.part` file |
 | `uploadAudio(id, ogg: File)` | `PUT /recordings/{id}/audio`, `Content-Type: audio/ogg`, raw file body |
+| `startAudioMultipart(id)` | `POST /recordings/{id}/audio/multipart` → `{ uploadId, partSize }`; used by `MeetingUploader` instead of the single PUT for audio over 64 MiB (the edge refuses bodies over 100 MB) |
+| `uploadAudioPart(id, uploadId, partNumber, file, offset, length)` | `PUT /recordings/{id}/audio/multipart/{uploadId}/{partNumber}`, a 32 MiB range of the file streamed from disk with `Content-Length` → `{ partNumber, etag }`; 408 retry the part, 404 `no_such_upload` start over |
+| `completeAudioMultipart(id, uploadId, parts)` | `POST /recordings/{id}/audio/multipart/{uploadId}/complete` with `{ parts: [{ partNumber, etag }] }` → `{ ok, size }`; 400 `invalid_parts` |
+| `abortAudioMultipart(id, uploadId)` | `DELETE /recordings/{id}/audio/multipart/{uploadId}` |
 | `pushRecording(id, summary, meta): Double?` | `POST /recordings/{id}` `{summary, meta}` → server `updatedAt` |
 | `deleteRecording(id)` | `DELETE /recordings/{id}` |
 | `refileRecording(id, folderId, summary?)` | `GET /recordings/{id}/meta`, then `POST /recordings/{id}` with the fresh meta and summary carrying the new `folderId` — an explicit `null` in **both** halves to un-file; `updatedAt` never echoed back |

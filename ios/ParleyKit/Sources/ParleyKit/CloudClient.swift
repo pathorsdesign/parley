@@ -172,6 +172,52 @@ public actor CloudClient: BatchTranscriptionService, DictionarySyncTransport {
             timeout: AudioUploadTimeout.forBody(bytes: bytes))
     }
 
+    // MARK: multipart audio (parley#755) — see `MultipartUploadPlan`
+
+    /// Open a multipart upload of recording `id`'s audio.
+    public func startMultipartUpload(id: String) async throws -> MultipartUploadPlan.Started {
+        let data = try await request("recordings/\(id)/audio/multipart", method: "POST")
+        do {
+            return try JSONDecoder().decode(MultipartUploadPlan.Started.self, from: data)
+        } catch {
+            throw CloudError(status: 0, message: "bad_multipart_start")
+        }
+    }
+
+    /// One part's PUT, built without a body for a background
+    /// `uploadTask(with:fromFile:)`, like `audioUploadRequest`.
+    public nonisolated func multipartPartRequest(
+        id: String, uploadId: String, partNumber: Int, bytes: Int
+    ) -> URLRequest {
+        var req = makeRequest(
+            "recordings/\(id)/audio/multipart/\(uploadId)/\(partNumber)", method: "PUT",
+            contentType: "application/octet-stream",
+            timeout: AudioUploadTimeout.forBody(bytes: bytes))
+        req.setValue(String(bytes), forHTTPHeaderField: "Content-Length")
+        return req
+    }
+
+    /// Stitch the landed parts into the recording's audio. Returns the size
+    /// the server reports for the finished object.
+    @discardableResult
+    public func completeMultipartUpload(
+        id: String, uploadId: String, parts: [MultipartUploadPlan.CompletedPart]
+    ) async throws -> Int? {
+        struct Body: Encodable { let parts: [MultipartUploadPlan.CompletedPart] }
+        struct Answer: Decodable { let ok: Bool?; let size: Int? }
+        let data = try await request(
+            "recordings/\(id)/audio/multipart/\(uploadId)/complete", method: "POST",
+            body: JSONEncoder().encode(Body(parts: parts)), contentType: "application/json",
+            timeout: Self.batchUploadTimeout)
+        return (try? JSONDecoder().decode(Answer.self, from: data))?.size
+    }
+
+    /// Abort a multipart upload. Best effort: an upload the server no longer
+    /// has is already as aborted as it gets.
+    public func abortMultipartUpload(id: String, uploadId: String) async {
+        _ = try? await request("recordings/\(id)/audio/multipart/\(uploadId)", method: "DELETE")
+    }
+
     /// The Ogg back again — the same path `uploadAudio` writes to, which is also
     /// the path the desktop reads (`src/lib/cloud/sync.ts`).
     ///

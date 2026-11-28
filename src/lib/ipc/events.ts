@@ -112,7 +112,8 @@ export interface ProsodyPayload {
 export interface MeetingErrorPayload {
   source: string;
   /** Hosted: "quota" (402) | "auth" (401 expired session). BYOK: "key"
-   *  (rejected vendor key). On-device: "local-missing" | "local-memory" |
+   *  (rejected vendor key) | "region" (the vendor refuses the user's region).
+   *  On-device: "local-missing" | "local-memory" |
    *  "local" (see lib/transcription/errors.ts). Any: "capture" (no audio
    *  source) | "connect". */
   code: string;
@@ -128,7 +129,16 @@ export interface MeetingWarningPayload {
 export type TranscriptionLinkPayload =
   /** A leg died or a handshake failed and a redial is scheduled. Fires once per
    *  attempt while offline; `attempt` is 1-based and consecutive. */
-  | { source: string; state: "reconnecting"; attempt: number }
+  | {
+      source: string;
+      state: "reconnecting";
+      attempt: number;
+      /** Set when Parley Cloud refused the session rather than the link
+       *  dropping: "auth" (it did not accept the session) or "quota". The
+       *  backend redials anyway, slowly, for as long as the meeting records
+       *  (#728). Absent from older backends and for a plain drop. */
+      reason?: TranscriptionRefusal | null;
+    }
   /** A leg's handshake completed — including the meeting's very first one
    *  (leg 0), which the store ignores because nothing was reconnecting. */
   | { source: string; state: "live"; leg: number }
@@ -136,6 +146,9 @@ export type TranscriptionLinkPayload =
    *  closed this source's session instead of redialling one that would idle
    *  out, and dials again — reporting "live" — once audio arrives. */
   | { source: string; state: "no_audio" };
+
+/** Why Parley Cloud refused a meeting's live transcription session. */
+export type TranscriptionRefusal = "auth" | "quota";
 
 export interface DiarizeProgressPayload {
   stage: string;

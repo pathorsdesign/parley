@@ -242,7 +242,6 @@ private fun ParleyNavHost(container: AppContainer) {
     DemoNavigation(navController, container)
     QuickRecordNavigation(navController)
 
-    val scope = rememberCoroutineScope()
     var pendingSplit by remember { mutableStateOf<PendingSplitImport?>(null) }
 
     // The Storage Access Framework: no storage permission, any provider (Files,

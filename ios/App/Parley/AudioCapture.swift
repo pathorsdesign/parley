@@ -353,15 +353,8 @@ final class AudioCapture: @unchecked Sendable {
     }
 
     private func startEngine() throws {
+        let hwFormat = try validatedTapFormat()
         let input = engine.inputNode
-        let hwFormat = input.outputFormat(forBus: 0)
-        // Right after an interruption or a route change the input node can
-        // report a 0 Hz format for a beat. Building a converter against it
-        // throws something unhelpful; the retry loop wants a clear signal that
-        // the hardware simply is not back yet.
-        guard hwFormat.sampleRate > 0, hwFormat.channelCount > 0 else {
-            throw CaptureError.inputUnavailable
-        }
         guard
             let target = AVAudioFormat(
                 commonFormat: .pcmFormatInt16, sampleRate: Double(ParleyStreamProtocol.sampleRate),
@@ -379,6 +372,50 @@ final class AudioCapture: @unchecked Sendable {
         try engine.start()
         tapFormat = hwFormat
         live = true
+    }
+
+    /// The format to install the tap with, checked against everything
+    /// `installTap(onBus:)` checks it against — because that call does not
+    /// throw on a mismatch, it raises an Objective-C exception that no Swift
+    /// `catch` can stop (parley#748: iOS 1.38 (56) aborted in AVFAudio from
+    /// `startEngine` on the rebuild path). Every refusal here is an ordinary
+    /// Swift error instead: `inputUnavailable` feeds the recovery ladder on a
+    /// rebuild, and surfaces as a retryable "Audio error" on a first start.
+    ///
+    /// Right after an interruption, a route change or a session reactivation
+    /// the input node can report a 0 Hz format for a beat (`notReady`), or keep
+    /// reporting the format of the hardware it was built against while the
+    /// session has moved to another sample rate (`stale`). A stale engine is
+    /// replaced once — a fresh `AVAudioEngine` reads the hardware as it is now
+    /// — and only a fresh engine that still disagrees with itself is refused.
+    private func validatedTapFormat() throws -> AVAudioFormat {
+        var verdict = Self.formatVerdict(
+            of: engine.inputNode,
+            sessionSampleRate: AVAudioSession.sharedInstance().sampleRate)
+        if verdict == .stale {
+            AppLog.capture.notice("input node format is stale; rebuilding the engine before the tap")
+            DiagnosticsJournal.record("capture_format_stale", "input format stale, fresh engine")
+            teardownEngine()
+            engine = AVAudioEngine()
+            verdict = Self.formatVerdict(of: engine.inputNode, sessionSampleRate: nil)
+        }
+        guard verdict == .ready else {
+            AppLog.capture.notice(
+                "input node not ready for a tap (\(String(describing: verdict), privacy: .public))")
+            throw CaptureError.inputUnavailable
+        }
+        return engine.inputNode.outputFormat(forBus: 0)
+    }
+
+    private static func formatVerdict(
+        of input: AVAudioInputNode, sessionSampleRate: Double?
+    ) -> CaptureFormatCheck.Verdict {
+        let tap = input.outputFormat(forBus: 0)
+        let hardware = input.inputFormat(forBus: 0)
+        return CaptureFormatCheck.verdict(
+            tap: .init(sampleRate: tap.sampleRate, channels: tap.channelCount),
+            hardware: .init(sampleRate: hardware.sampleRate, channels: hardware.channelCount),
+            sessionSampleRate: sessionSampleRate)
     }
 
     private func teardownEngine() {

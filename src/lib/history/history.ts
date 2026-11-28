@@ -198,6 +198,28 @@ export interface LiveMeetingSnapshot {
   /** The backend recorded it without this window knowing (the page reloaded
    *  under a running capture): its transcript is gone, keep the audio. */
   orphan: boolean;
+  /** Cut off rather than ended: Parley quit mid-meeting (or the page lost
+   *  it — every orphan is). Saved as a recovered entry, see
+   *  {@link HistoryEntry.recovered}. */
+  interrupted: boolean;
+}
+
+/** Live meetings the app is quitting under (markLiveMeetingInterrupted). */
+const interruptedMeetings = new Set<string>();
+
+/** The live meeting is being cut off by a quit, not ended by the user: its
+ *  save keeps the live name with the recovered mark. Call before ending it. */
+export function markLiveMeetingInterrupted(): void {
+  const id = useLiveStore.getState().liveMeetingId;
+  if (id) interruptedMeetings.add(id);
+}
+
+/** The title a recovered live meeting saves under: its own name (typed in
+ *  the meeting window, else the dated default) plus the recovered mark —
+ *  never a generated one. Pure + exported for testing. */
+export function recoveredTitle(base: string, lang: Settings["language"]): string {
+  const suffix = translate(lang, "history.recoveredSuffix");
+  return base.endsWith(suffix) ? base : `${base}${suffix}`;
 }
 
 /** Stopped meetings whose recording is still being encoded and saved. */
@@ -219,6 +241,7 @@ export function snapshotLiveMeeting(): LiveMeetingSnapshot | null {
     ...agendaField(s.todos),
     ...liveSuggestionsField(s.liveSuggestLog),
     orphan: false,
+    interrupted: interruptedMeetings.has(s.liveMeetingId),
   };
 }
 
@@ -262,6 +285,7 @@ export function orphanSnapshot(id: string, startedAtMs: number | undefined): Liv
       origin: "default",
     },
     orphan: true,
+    interrupted: true,
   };
 }
 
@@ -480,11 +504,13 @@ export async function saveLiveToHistory(
   const speechRateHz = await liveSpeechRate(snap, audioTempPath);
   const save = snap.save;
   log.info("history: live save destination", { id: snap.id, origin: save.origin, folderId: save.folderId });
+  const baseTitle = snap.title ?? `${translate(s.settings.language, "history.liveTitle")} · ${dateLabel}`;
+  interruptedMeetings.delete(snap.id);
   const entry: HistoryEntry = {
     // The meeting's own id: a second save of the same meeting (a recovered
     // journal, a repeated event) overwrites its entry instead of duplicating it.
     id: snap.id,
-    title: snap.title ?? `${translate(s.settings.language, "history.liveTitle")} · ${dateLabel}`,
+    title: snap.interrupted ? recoveredTitle(baseTitle, s.settings.language) : baseTitle,
     source: "live",
     createdAt,
     durationMs,
@@ -492,6 +518,7 @@ export async function saveLiveToHistory(
     folderId: save.folderId,
     ...analysis,
     ...agendaField(snap.agenda),
+    ...(snap.interrupted ? { recovered: true as const } : {}),
     ...liveSuggestionsField(snap.liveSuggestions),
     speechRateHz,
     // Only a diarized meeting needs it: a two-stream one already knows which
@@ -511,6 +538,10 @@ export async function saveLiveToHistory(
     throw e;
   }
   finishJournal(snap.id);
+  // A transcript that covers much less than the recording (a relay that never
+  // came back, a refused session, a quit mid-meeting) is re-transcribed from
+  // the file in the background (#728).
+  queueBackfill(entry.id);
 
   // A per-meeting MOVE to an org drops the personal original once the copy is
   // in, so there is no personal report to open — the copy must carry the
@@ -556,6 +587,11 @@ export async function saveLiveToHistory(
     // was waiting on is done, whatever the background passes do next.
     clearFinalizing();
   }
+
+  // Name it and suggest folders, unless its report is on screen (the study
+  // pipeline does it there). Queued, never awaited: neither the save nor
+  // quitting after it waits on a model call.
+  queueFilingAfterSave(entry.id);
 
   // Background: correct the speakers from the audio, THEN make the org copy —
   // in that order, so a shared copy carries the corrected labels.
@@ -615,6 +651,13 @@ async function liveSpeechRate(snap: LiveMeetingSnapshot, audioTempPath: string):
   if (snap.micSessionRateHz != null) return snap.micSessionRateHz;
   const micOnlyRecording = !snap.analysis.segments.some((seg) => seg.source === "mix");
   return micOnlyRecording && !snap.orphan ? measureRecordingRate(audioTempPath) : null;
+}
+
+/** Queue a coverage backfill (lazily imported: it pulls in the batch lane). */
+function queueBackfill(id: string): void {
+  import("../meeting/coverageBackfill")
+    .then((m) => m.queueCoverageBackfill(id))
+    .catch((e) => log.warn("history: queueing the coverage backfill failed", { id, error: String(e) }));
 }
 
 function clearFinalizing(): void {
@@ -756,7 +799,18 @@ export async function saveUploadToHistory(session: ReplaySession): Promise<strin
     if (uploadSaveInFlight === saving) uploadSaveInFlight = null;
   }
   await applyDefaultOrgShare(id, save);
+  // Usually still on screen (the pipeline names it there); if the user has
+  // moved on, the background pass does.
+  queueFilingAfterSave(id);
   return id;
+}
+
+/** Queue the background filing pass for a just-saved entry (filingQueue.ts).
+ *  Fire-and-forget: a failure to even load the queue is logged, never thrown. */
+function queueFilingAfterSave(id: string): void {
+  import("../analysis/filingQueue")
+    .then((m) => m.queueBackgroundFiling(id))
+    .catch((e) => log.warn("history: queueing the filing pass failed", { id, error: String(e) }));
 }
 
 /** What the transcript-import dialog saves (issue #130's text-ingest path). */
@@ -1273,16 +1327,19 @@ async function saveRecovered(
   const dateLabel = new Date(snap.createdAt).toLocaleString(localeOf());
   const entry: HistoryEntry = {
     id: r.meetingId,
-    title: `${translate(lang, "history.liveTitle")} · ${dateLabel}${translate(lang, "history.recoveredSuffix")}`,
+    title: recoveredTitle(`${translate(lang, "history.liveTitle")} · ${dateLabel}`, lang),
     source: "live",
     createdAt: snap.createdAt,
     durationMs: r.durationMs,
     audio: "audio.ogg",
     folderId: snap.save.folderId,
     ...snap.analysis,
+    recovered: true,
   };
   await persist(entry, r.path, /* compress */ false);
   log.warn("history: recovered an unfinished meeting", { id: r.meetingId, durationMs: r.durationMs });
+  // No transcript at all: the coverage check reads it as one whole-file gap.
+  queueBackfill(entry.id);
   return true;
 }
 

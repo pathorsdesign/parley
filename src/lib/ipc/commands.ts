@@ -78,6 +78,9 @@ export interface CacheSizes {
 export interface HistoryReadResult {
   meta: HistoryEntry;
   audioPath: string | null;
+  /** The recording's size on disk in bytes (null without one; absent from an
+   *  older backend). */
+  audioBytes?: number | null;
 }
 
 /** `read_transcript_file` (history.rs `TranscriptFile`). */
@@ -152,6 +155,7 @@ export const startMeeting = (args: {
 export const stopMeeting = (args: { keepMs?: number | null } = {}) => invoke<void>("stop_meeting", args);
 export const cancelMeeting = () => invoke<void>("cancel_meeting");
 export const setMeetingPaused = (args: { paused: boolean }) => invoke<void>("set_meeting_paused", args);
+export const setMeetingMicMuted = (args: { muted: boolean }) => invoke<void>("set_meeting_mic_muted", args);
 export const meetingActive = () => invoke<boolean>("meeting_active");
 /** Move and resize the calling window to a frame in logical px (top-left
  *  origin), gliding there over `durationMs` on macOS; set at once elsewhere
@@ -227,6 +231,19 @@ export const transcribeFile = (args: {
   fresh?: boolean;
 }) => invoke<TranscriptionResult>("transcribe_file", args);
 export const measureAudioSpeechRate = (args: { path: string }) => invoke<number>("measure_audio_speech_rate", args);
+/** A picked file's duration (container metadata, no decode; null when it
+ *  doesn't say), whether its codec can be compressed for upload, and its size. */
+export interface AudioProbe {
+  durationMs: number | null;
+  compressible: boolean;
+  bytes: number;
+}
+export const probeUploadAudio = (args: { path: string }) => invoke<AudioProbe>("probe_upload_audio", args);
+/** Compress a long recording into `parts` equal Opus temp files, in order. */
+export const splitUploadAudio = (args: { path: string; parts: number }) =>
+  invoke<string[]>("split_upload_audio", args);
+/** Delete the temp files {@link splitUploadAudio} made (nothing else). */
+export const discardUploadParts = (args: { paths: string[] }) => invoke<void>("discard_upload_parts", args);
 export const preparePlaybackFallback = (args: { audioPath: string }) =>
   invoke<string>("prepare_playback_fallback", args);
 
@@ -273,6 +290,11 @@ export const voiceprintMatch = (args: { audioPath: string; speakers: { key: stri
 
 export const listHistory = () => invoke<string[]>("list_history");
 export const readHistoryEntry = (args: { id: string }) => invoke<HistoryReadResult>("read_history_entry", args);
+/** Size in bytes of an entry's recording, null when it has none (history.rs). */
+export const historyAudioSize = (args: { id: string }) => invoke<number | null>("history_audio_size", args);
+/** Raw bytes of an entry's recording from `offset` (≤ 64 MiB; fewer at the end). */
+export const readHistoryAudioRange = (args: { id: string; offset: number; length: number }) =>
+  invoke<ArrayBuffer>("read_history_audio_range", args);
 export const saveHistoryEntry = (args: {
   id: string;
   summaryJson: string;
@@ -369,7 +391,9 @@ export const requestMicrophone = () => invoke<void>("request_microphone");
 export const probeSystemAudio = () => invoke<string>("probe_system_audio");
 
 /** `verify_stt_key` (commands/key_check.rs): does the vendor accept this speech-to-text key? */
-export type KeyCheck = "accepted" | "rejected" | "unknown";
+/** "regionUnsupported": the vendor refused because of where the request comes
+ *  from (HK / mainland China), not the key. */
+export type KeyCheck = "accepted" | "rejected" | "regionUnsupported" | "unknown";
 export const verifySttKey = (args: { provider: string; key: string }) => invoke<KeyCheck>("verify_stt_key", args);
 /** pane: "microphone" | "system-audio" | "input-monitoring" | "accessibility" | "keyboard" */
 export const openPrivacySettings = (args: { pane: string }) => invoke<void>("open_privacy_settings", args);
@@ -379,6 +403,9 @@ export const appIdentity = () => invoke<AppIdentity>("app_identity");
 
 export const setTrayLabels = (args: { labels: TrayLabels }) => invoke<void>("set_tray_labels", args);
 export const trayActive = () => invoke<boolean>("tray_active");
+/** The main window has a quit request (src-tauri/src/quit.rs): give the
+ *  meeting's save time before the backend's fallback exit. */
+export const quitAcknowledged = () => invoke<void>("quit_acknowledged");
 export const launchAtLoginStatus = () => invoke<boolean>("launch_at_login_status");
 export const setLaunchAtLogin = (args: { enabled: boolean }) => invoke<boolean>("set_launch_at_login", args);
 export const markShowOnNextLaunch = () => invoke<void>("mark_show_on_next_launch");

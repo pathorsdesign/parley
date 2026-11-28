@@ -50,12 +50,17 @@ pub struct HistoryRead {
     meta: serde_json::Value,
     #[serde(rename = "audioPath")]
     audio_path: Option<String>,
+    /// The recording's size on disk, so cloud sync can refuse one the cloud
+    /// would reject (over its 100 MB body limit) without reading it.
+    #[serde(rename = "audioBytes")]
+    audio_bytes: Option<u64>,
 }
 
 /// Save (or overwrite) a history entry. `meta_json` / `summary_json` are written
 /// verbatim. If `audio_source_path` is given it becomes `audio.ogg`:
-///   - `compress = true`  (upload): re-encode the source to Opus (fall back to a
-///     raw copy if compression fails for an odd codec).
+///   - `compress = true`  (upload): Opus at 16 kHz mono — the file already
+///     compressed for its transcription when there is one, else the source
+///     encoded now (see [`place_upload_audio`]).
 ///   - `compress = false` (live): the source is already an encoded temp `.ogg`,
 ///     so just move it into place.
 /// Returns the absolute entry directory.
@@ -98,13 +103,7 @@ fn write_entry(
         let src = PathBuf::from(src);
         let dest = dir.join("audio.ogg");
         if compress {
-            match crate::replay_audio::compress_for_upload(&src) {
-                Ok(tmp) => move_file(&tmp, &dest)?,
-                Err(e) => {
-                    log::warn!("history: compress failed ({e}); copying raw source");
-                    std::fs::copy(&src, &dest).map_err(|e| e.to_string())?;
-                }
-            }
+            place_upload_audio(&src, &dest)?;
         } else {
             move_file(&src, &dest)?;
         }
@@ -114,6 +113,32 @@ fn write_entry(
     std::fs::write(dir.join("meta.json"), meta_json).map_err(|e| e.to_string())?;
     log::info!("history: saved entry {}", dir.to_string_lossy());
     Ok(dir.to_string_lossy().into_owned())
+}
+
+/// Put an uploaded recording's audio at `dest` as Opus, cheapest way first:
+///   1. the file compressed for its transcription moments ago (replay.rs keeps
+///      it): moved into place, no second encode of the same source;
+///   2. a source that already is 16 kHz mono low-bitrate Opus (a split part,
+///      the app's own recording): copied as is — copied, never moved, since it
+///      may be the user's own file;
+///   3. otherwise compressed now, falling back to a raw copy for an odd codec.
+fn place_upload_audio(src: &Path, dest: &Path) -> Result<(), String> {
+    if let Some(tmp) = crate::replay_audio::take_compressed(src) {
+        log::info!("history: reusing the upload's compressed audio");
+        return move_file(&tmp, dest);
+    }
+    if crate::replay_audio::is_upload_ready(src) {
+        std::fs::copy(src, dest).map_err(|e| e.to_string())?;
+        return Ok(());
+    }
+    match crate::replay_audio::compress_for_upload(src) {
+        Ok(tmp) => move_file(&tmp, dest),
+        Err(e) => {
+            log::warn!("history: compress failed ({e}); copying raw source");
+            std::fs::copy(src, dest).map_err(|e| e.to_string())?;
+            Ok(())
+        }
+    }
 }
 
 /// Save an entry pulled from the cloud: when `audio_url` is given, fetch the
@@ -298,6 +323,61 @@ pub async fn list_history(app: AppHandle) -> Result<Vec<String>, String> {
         .map_err(|e| format!("history list task panicked: {e}"))?
 }
 
+/// The largest range [`read_history_audio_range`] returns: the cloud's
+/// multipart part ceiling (pathorsAI/parley#755). Clients send 32 MiB parts.
+pub(crate) const MAX_AUDIO_RANGE_BYTES: u64 = 64 * 1024 * 1024;
+
+/// The size in bytes of entry `id`'s recording, or `None` when it has none.
+/// The cloud push picks single PUT or multipart from it without reading the
+/// file (pathorsAI/parley#755).
+#[tauri::command]
+pub fn history_audio_size(app: AppHandle, id: String) -> Result<Option<u64>, String> {
+    let audio = history_dir(&app)?.join(safe_id(&id)).join("audio.ogg");
+    match std::fs::metadata(&audio) {
+        Ok(m) => Ok(Some(m.len())),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+/// `length` bytes of entry `id`'s recording from `offset` (fewer at the end of
+/// the file), as raw bytes — an `ArrayBuffer` in the webview. A multipart cloud
+/// upload reads each part as it sends it, so a many-hour recording is never
+/// held whole in the webview (pathorsAI/parley#755). Only an entry's own
+/// `audio.ogg` is reachable, and a range is capped at
+/// [`MAX_AUDIO_RANGE_BYTES`].
+#[tauri::command]
+pub async fn read_history_audio_range(
+    app: AppHandle,
+    id: String,
+    offset: u64,
+    length: u64,
+) -> Result<tauri::ipc::Response, String> {
+    let audio = history_dir(&app)?.join(safe_id(&id)).join("audio.ogg");
+    let bytes = tauri::async_runtime::spawn_blocking(move || read_range(&audio, offset, length))
+        .await
+        .map_err(|e| format!("audio range task panicked: {e}"))??;
+    Ok(tauri::ipc::Response::new(bytes))
+}
+
+/// The file side of [`read_history_audio_range`].
+fn read_range(path: &Path, offset: u64, length: u64) -> Result<Vec<u8>, String> {
+    use std::io::{Read, Seek, SeekFrom};
+    if length > MAX_AUDIO_RANGE_BYTES {
+        return Err(format!(
+            "audio range too large: {length} bytes (max {MAX_AUDIO_RANGE_BYTES})"
+        ));
+    }
+    let mut file = std::fs::File::open(path).map_err(|e| e.to_string())?;
+    file.seek(SeekFrom::Start(offset))
+        .map_err(|e| e.to_string())?;
+    let mut out = Vec::with_capacity(length as usize);
+    file.take(length)
+        .read_to_end(&mut out)
+        .map_err(|e| e.to_string())?;
+    Ok(out)
+}
+
 /// The file-side of [`list_history`]. Synchronous; runs on a blocking worker.
 fn read_summaries(base: &Path) -> Result<Vec<String>, String> {
     let mut out = Vec::new();
@@ -324,8 +404,16 @@ pub fn read_history_entry(app: AppHandle, id: String) -> Result<HistoryRead, Str
     let raw = std::fs::read_to_string(dir.join("meta.json")).map_err(|e| e.to_string())?;
     let meta: serde_json::Value = serde_json::from_str(&raw).map_err(|e| e.to_string())?;
     let audio = dir.join("audio.ogg");
+    let audio_bytes = std::fs::metadata(&audio)
+        .ok()
+        .filter(|m| m.is_file())
+        .map(|m| m.len());
     let audio_path = audio.exists().then(|| audio.to_string_lossy().into_owned());
-    Ok(HistoryRead { meta, audio_path })
+    Ok(HistoryRead {
+        meta,
+        audio_path,
+        audio_bytes,
+    })
 }
 
 /// Rename an entry: patch `title` in both `meta.json` and `summary.json` (leaving
@@ -430,7 +518,25 @@ pub fn read_transcript_file(path: String) -> Result<TranscriptFile, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{apply_rename, looks_like_audio};
+
+    #[test]
+    fn a_range_read_returns_exactly_the_bytes_asked_for() {
+        let dir = std::env::temp_dir().join(format!("parley-range-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("audio.ogg");
+        let data: Vec<u8> = (0..=255u8).cycle().take(10_000).collect();
+        std::fs::write(&path, &data).unwrap();
+        assert_eq!(read_range(&path, 0, 4).unwrap(), data[..4]);
+        assert_eq!(read_range(&path, 9_000, 500).unwrap(), data[9_000..9_500]);
+        // The last part is shorter; past the end is empty, not an error.
+        assert_eq!(read_range(&path, 9_900, 500).unwrap(), data[9_900..]);
+        assert!(read_range(&path, 20_000, 10).unwrap().is_empty());
+        assert!(read_range(&path, 0, MAX_AUDIO_RANGE_BYTES + 1).is_err());
+        assert!(read_range(&dir.join("missing.ogg"), 0, 1).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    use super::{apply_rename, looks_like_audio, read_range, MAX_AUDIO_RANGE_BYTES};
     use serde_json::json;
 
     #[test]

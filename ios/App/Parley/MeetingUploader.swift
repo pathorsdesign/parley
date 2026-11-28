@@ -130,6 +130,18 @@ final class MeetingUploader {
         /// head of the queue. Nil for an entry that has only ever failed on
         /// the network, or never failed at all.
         var parking: UploadParking?
+        /// When a background transfer landed this entry's audio on the server
+        /// (parley#727). Set by `markAudioUploaded` from the session delegate,
+        /// possibly in a process that was relaunched just to hear about it, so
+        /// the next attempt skips the PUT and only makes the follow-up calls.
+        /// Nil until then — and on every manifest written before it existed.
+        var audioUploadedAt: Date?
+        /// A multipart upload of this entry's audio in progress (parley#755):
+        /// audio over `MultipartUploadPlan.threshold` goes up in parts, each its
+        /// own background transfer, and this is how a relaunched app knows
+        /// which parts have landed. Nil for audio sent in one piece, and once
+        /// the parts have been stitched together (`audioUploadedAt` is set).
+        var multipart: MultipartUploadPlan.State?
 
         /// Both new fields decode with a default, because this manifest is
         /// written to disk and read back by a *later build of the app*. Someone
@@ -139,7 +151,7 @@ final class MeetingUploader {
         /// manifest reads as exactly what it was: a clock-named live recording.
         enum CodingKeys: String, CodingKey {
             case id, startedAt, durationMs, segments, defaultSave, source, title
-            case queuedAt, failureCount, lastError, parking
+            case queuedAt, failureCount, lastError, parking, audioUploadedAt, multipart
         }
 
         init(
@@ -175,6 +187,11 @@ final class MeetingUploader {
             failureCount = try container.decodeIfPresent(Int.self, forKey: .failureCount) ?? 0
             lastError = try container.decodeIfPresent(String.self, forKey: .lastError)
             parking = try container.decodeIfPresent(UploadParking.self, forKey: .parking)
+            audioUploadedAt = try container.decodeIfPresent(Date.self, forKey: .audioUploadedAt)
+            // `try?`: a state this build cannot read restarts the upload rather
+            // than losing the recording to a decoding error.
+            multipart = (try? container.decodeIfPresent(
+                MultipartUploadPlan.State.self, forKey: .multipart)) ?? nil
         }
 
         /// The name this recording lands under.
@@ -344,6 +361,11 @@ final class MeetingUploader {
             return .uploaded
         } catch is UploadInFlight {
             return .busy
+        } catch is BackgroundAudioUpload.StillUploading {
+            // Handed to the system and still going (or waiting for a network):
+            // its completion finishes the entry. Not a failure, and nothing
+            // behind it is blocked by a transfer the system is running.
+            return .busy
         } catch let error as CloudError
             where UploadFailureDisposition.of(httpStatus: error.status) == .park
         {
@@ -415,6 +437,11 @@ final class MeetingUploader {
     static func deleteQueued(id: String) -> Bool {
         guard inFlight.claim(id) else { return false }
         defer { inFlight.release(id) }
+        // The system may be reading the Ogg for a background transfer; stop it
+        // before the file goes. Fire-and-forget: a transfer that slips through
+        // fails on the missing file, and its completion finds no manifest to
+        // touch.
+        Task { await BackgroundAudioUpload.shared.cancel(id: id) }
         removePending(id: id)
         DiagnosticsJournal.record("sync_deleted_by_user", "queued recording deleted")
         return true
@@ -448,6 +475,9 @@ final class MeetingUploader {
             return try await upload(pending, cloud: cloud, orgs: orgs, isRetry: isRetry)
         } catch is CancellationError {
             throw CancellationError()
+        } catch let handedOff as BackgroundAudioUpload.StillUploading {
+            // The caller stopped waiting; the transfer did not stop.
+            throw handedOff
         } catch {
             let code = FeedbackErrorCode.of(error)
             noteFailure(id: pending.id, code: code, error: error)
@@ -540,7 +570,35 @@ final class MeetingUploader {
     ) async throws -> Outcome {
         let finals = pending.segments
         let personalFolderId = pending.defaultSave.isOrg ? nil : pending.defaultSave.folderId
-        let audio = try Data(contentsOf: audioURL(for: pending.id))
+        let audioFile = try audioURL(for: pending.id)
+        let audioBytes = (try? audioFile.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0
+
+        // The audio goes through the background session (parley#727): the
+        // system finishes it even if the app is suspended the moment this
+        // starts. The queued Ogg *is* the request body, so it is uploaded in
+        // place — never moved or deleted while a transfer may be reading it.
+        // Re-read from disk rather than from `pending`: a transfer that landed
+        // while this pass was getting here has already written it down. First,
+        // before anything else talks to the server, so the transfer is in the
+        // system's hands as early as possible.
+        if !audioAlreadyUploaded(id: pending.id) {
+            if MultipartUploadPlan.usesMultipart(bytes: audioBytes) {
+                // Over Cloudflare's 100 MB body limit territory (parley#755):
+                // in parts, each its own background transfer.
+                try await uploadMultipart(
+                    id: pending.id, audioFile: audioFile, bytes: audioBytes, cloud: cloud)
+            } else {
+                try await BackgroundAudioUpload.shared.upload(
+                    id: pending.id, fileURL: audioFile,
+                    request: cloud.audioUploadRequest(id: pending.id, bytes: audioBytes),
+                    bytes: audioBytes)
+            }
+        }
+        // The rest is a handful of small calls. The transfer may have finished
+        // with the app in the background and the caller's own grace long
+        // spent, so hold the app awake for them.
+        let hold = await BackgroundGrace.hold("meeting-upload-finish")
+        defer { Task { @MainActor in hold.end() } }
 
         // A retry that rebuilt the entry from the manifest used to push the
         // clock name and the queued folder straight back over a recording that
@@ -562,7 +620,6 @@ final class MeetingUploader {
             summary = fresh
         }
 
-        try await cloud.uploadAudio(id: pending.id, ogg: audio)
         try await cloud.pushRecording(id: pending.id, summary: summary, meta: meta)
 
         var outcome = Outcome(
@@ -603,6 +660,247 @@ final class MeetingUploader {
         }
         return outcome
     }
+
+    // MARK: background transfer bookkeeping (parley#727)
+
+    /// Whether the entry's manifest records a background transfer that landed.
+    private static func audioAlreadyUploaded(id: String) -> Bool {
+        loadManifest(id: id)?.audioUploadedAt != nil
+    }
+
+    private static func loadManifest(id: String) -> PendingUpload? {
+        guard let url = try? manifestURL(for: id), let data = try? Data(contentsOf: url) else {
+            return nil
+        }
+        return try? JSONDecoder().decode(PendingUpload.self, from: data)
+    }
+
+    /// A background transfer of this entry's audio finished with a 2xx. Called
+    /// from the session delegate, in whatever process heard about it. A
+    /// manifest that is gone (the entry finished or was deleted) is left gone.
+    static func markAudioUploaded(id: String, at date: Date = Date()) {
+        guard let url = try? manifestURL(for: id), var entry = loadManifest(id: id) else { return }
+        entry.audioUploadedAt = date
+        if let data = try? JSONEncoder().encode(entry) {
+            try? data.write(to: url, options: .atomic)
+        }
+    }
+
+    // MARK: multipart audio (parley#755)
+
+    /// Send `audioFile` as a multipart upload, continuing the one recorded on
+    /// the entry when it still describes this file, and mark the audio
+    /// uploaded once the server has stitched the parts.
+    ///
+    /// Each part is cut out of the Ogg into its own file (a background session
+    /// only uploads from a file) and sent through the same background session
+    /// as a whole-file PUT, so a pass that stops waiting (`StillUploading`)
+    /// leaves the part to the system exactly as it leaves a whole file, and
+    /// the part's completion — written onto the entry by the delegate — is
+    /// picked up by the next pass. Refusals end up where the single PUT's do:
+    /// `uploadCountingFailure` counts them and parks the entry.
+    private static func uploadMultipart(
+        id: String, audioFile: URL, bytes: Int, cloud: CloudClient
+    ) async throws {
+        var restartsLeft = MultipartUploadPlan.restarts
+        while true {
+            let state = try await multipartState(id: id, bytes: bytes, cloud: cloud)
+            do {
+                try await sendRemainingParts(id: id, state: state, audioFile: audioFile, cloud: cloud)
+                // Re-read: the delegate is what writes the etags down.
+                guard let landed = loadManifest(id: id)?.multipart, landed.isComplete,
+                    landed.uploadId == state.uploadId
+                else { throw CloudError(status: 0, message: "multipart_parts_missing") }
+                try await cloud.completeMultipartUpload(
+                    id: id, uploadId: landed.uploadId, parts: landed.completionParts)
+                updateManifest(id: id) {
+                    $0.multipart = nil
+                    $0.audioUploadedAt = Date()
+                }
+                removePartFiles(id: id)
+                AppLog.sync.info(
+                    "upload \(id, privacy: .public) multipart complete (\(landed.parts.count, privacy: .public) parts)")
+                return
+            } catch let error as CloudError {
+                switch MultipartUploadPlan.refusal(status: error.status, message: error.message) {
+                case .restart where restartsLeft > 0:
+                    // The server no longer has this upload (it expired, or the
+                    // parts it holds are not the ones we have): start over.
+                    restartsLeft -= 1
+                    AppLog.sync.notice("upload \(id, privacy: .public) multipart restarts: http_\(error.status, privacy: .public)")
+                    updateManifest(id: id) { $0.multipart = nil }
+                    removePartFiles(id: id)
+                    continue
+                case .restart, .gone:
+                    // Next pass starts a fresh upload; the refusal itself is
+                    // counted (and parked) like any other.
+                    updateManifest(id: id) { $0.multipart = nil }
+                    removePartFiles(id: id)
+                    throw error
+                case .retryPart, .other:
+                    throw error
+                }
+            }
+        }
+    }
+
+    /// The entry's multipart upload if it still describes this file, else a
+    /// new one, written onto the entry before any part is sent.
+    private static func multipartState(
+        id: String, bytes: Int, cloud: CloudClient
+    ) async throws -> MultipartUploadPlan.State {
+        if let existing = loadManifest(id: id)?.multipart {
+            if existing.matches(totalBytes: bytes) { return existing }
+            // The file changed under it (it never should), or the state is
+            // unusable: drop the server's half-done upload and start over.
+            await cloud.abortMultipartUpload(id: id, uploadId: existing.uploadId)
+            removePartFiles(id: id)
+        }
+        let started = try await cloud.startMultipartUpload(id: id)
+        let state = MultipartUploadPlan.State(
+            uploadId: started.uploadId,
+            partSize: MultipartUploadPlan.partSize(fromServer: started.partSize),
+            totalBytes: bytes)
+        updateManifest(id: id) { $0.multipart = state }
+        return state
+    }
+
+    private static func sendRemainingParts(
+        id: String, state: MultipartUploadPlan.State, audioFile: URL, cloud: CloudClient
+    ) async throws {
+        for part in state.remaining {
+            // A part that landed while an earlier part was being sent (a
+            // transfer this pass attached to, finishing late) is not sent again.
+            if loadManifest(id: id)?.multipart?.remaining.contains(part) == false { continue }
+            let partFile = try writePartFile(id: id, part: part, from: audioFile)
+            var retriesLeft = MultipartUploadPlan.partRetries
+            while true {
+                do {
+                    _ = try await BackgroundAudioUpload.shared.uploadPart(
+                        id: id, uploadId: state.uploadId, part: part.number, fileURL: partFile,
+                        request: cloud.multipartPartRequest(
+                            id: id, uploadId: state.uploadId, partNumber: part.number,
+                            bytes: part.length),
+                        bytes: part.length)
+                    break
+                } catch let error as CloudError
+                    where MultipartUploadPlan.refusal(status: error.status, message: error.message)
+                        == .retryPart && retriesLeft > 0
+                {
+                    retriesLeft -= 1
+                    AppLog.sync.notice(
+                        "upload \(id, privacy: .public) part \(part.number, privacy: .public) timed out (408), resending")
+                }
+            }
+            try? FileManager.default.removeItem(at: partFile)
+        }
+    }
+
+    /// The part's bytes in a file of their own, for `uploadTask(fromFile:)`.
+    /// Reused when it is already there with the right size, which is what an
+    /// attached or relaunched transfer may still be reading.
+    private static func writePartFile(
+        id: String, part: MultipartUploadPlan.Part, from audioFile: URL
+    ) throws -> URL {
+        let directory = try partsDirectory(for: id)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let url = directory.appendingPathComponent("\(part.number).part")
+        if let size = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize, size == part.length {
+            return url
+        }
+        let handle = try FileHandle(forReadingFrom: audioFile)
+        defer { try? handle.close() }
+        try handle.seek(toOffset: UInt64(part.offset))
+        let data = try handle.read(upToCount: part.length) ?? Data()
+        guard data.count == part.length else { throw CocoaError(.fileReadCorruptFile) }
+        try data.write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+        return url
+    }
+
+    private static func partsDirectory(for id: String) throws -> URL {
+        try pendingDirectory().appendingPathComponent("\(id).parts", isDirectory: true)
+    }
+
+    private static func removePartFiles(id: String) {
+        if let directory = try? partsDirectory(for: id) {
+            try? FileManager.default.removeItem(at: directory)
+        }
+    }
+
+    /// Read, change and write back one entry's manifest. A manifest that is
+    /// gone (finished, deleted) stays gone.
+    private static func updateManifest(id: String, _ change: (inout PendingUpload) -> Void) {
+        guard let url = try? manifestURL(for: id), var entry = loadManifest(id: id) else { return }
+        change(&entry)
+        if let data = try? JSONEncoder().encode(entry) {
+            try? data.write(to: url, options: .atomic)
+        }
+    }
+
+    /// A background transfer of one part landed. Called from the session
+    /// delegate, before anyone waiting hears about it, so the etag survives
+    /// whatever happens to this process next. A part of an upload the entry no
+    /// longer records (it restarted) is ignored.
+    static func markPartUploaded(id: String, uploadId: String, part: Int, etag: String) {
+        updateManifest(id: id) { entry in
+            guard let state = entry.multipart, state.uploadId == uploadId else { return }
+            entry.multipart = state.recording(part: part, etag: etag)
+        }
+        if let file = try? partsDirectory(for: id).appendingPathComponent("\(part).part") {
+            try? FileManager.default.removeItem(at: file)
+        }
+    }
+
+    /// A part was refused with nobody waiting. An upload the server no longer
+    /// has is forgotten so the next pass starts over; the refusal is counted
+    /// like any other background failure.
+    static func noteBackgroundPartFailure(id: String, uploadId: String, error: CloudError) {
+        switch MultipartUploadPlan.refusal(status: error.status, message: error.message) {
+        case .restart, .gone:
+            updateManifest(id: id) { entry in
+                if entry.multipart?.uploadId == uploadId { entry.multipart = nil }
+            }
+            removePartFiles(id: id)
+        case .retryPart, .other:
+            break
+        }
+        noteBackgroundFailure(id: id, error: error)
+    }
+
+    /// A background transfer failed with nobody in this process waiting to
+    /// count it — the app was relaunched for it, or the waiter had given up.
+    static func noteBackgroundFailure(id: String, error: Error) {
+        let code = FeedbackErrorCode.of(error)
+        noteFailure(id: id, code: code, error: error)
+        AppLog.sync.error("upload \(id, privacy: .public) failed in background: \(code, privacy: .public)")
+        DiagnosticsJournal.record("sync_\(code)", "background upload failed")
+    }
+
+    /// Make the follow-up calls (meta push, share, filing, retiring the Ogg)
+    /// for an entry whose audio a background transfer just landed with nobody
+    /// waiting — typically in a process the system launched in the background
+    /// for the transfer. Uses the stored session token, as every queue pass
+    /// does; a token the Keychain cannot hand over (or a failing call) leaves
+    /// the entry queued with its audio marked as uploaded, and the next pass
+    /// makes only these calls.
+    static func finishAfterBackgroundUpload(id: String) async {
+        let hold = await BackgroundGrace.hold("meeting-upload-followup")
+        defer { Task { @MainActor in hold.end() } }
+        let cloud = CloudClient { KeychainStore.get(AppState.tokenKey) }
+        // `retry` goes through the in-flight claim, so a pass already holding
+        // this entry finishes it instead and this returns at once.
+        let done = await retry(id: id, cloud: cloud, orgs: [])
+        AppLog.sync.info(
+            "upload \(id, privacy: .public) follow-up after background transfer: \(done ? "done" : "deferred", privacy: .public)"
+        )
+        await MainActor.run {
+            NotificationCenter.default.post(name: uploadQueueChanged, object: nil)
+        }
+    }
+
+    /// Posted on the main queue when a background completion changed the
+    /// queue, so the counts on screen can be re-read.
+    static let uploadQueueChanged = Notification.Name("ParleyUploadQueueChanged")
 
     /// Whether a transcript has anything in it for the filing pass to read.
     private static func hasSpokenText(_ segments: [TranscriptSegment]) -> Bool {
@@ -749,7 +1047,8 @@ final class MeetingUploader {
     }
 
     private static func removePending(id: String) {
-        [try? audioURL(for: id), try? manifestURL(for: id)].compactMap { $0 }.forEach { url in
+        [try? audioURL(for: id), try? manifestURL(for: id), try? partsDirectory(for: id)]
+            .compactMap { $0 }.forEach { url in
             try? FileManager.default.removeItem(at: url)
         }
     }

@@ -66,9 +66,16 @@ function SystemAudioBanner() {
  * (store.transcriptionLink). Hiding it early would leave a frozen transcript
  * with no explanation.
  */
+/** Parley Cloud turned the session down: say why, not just "reconnecting" (#728). */
+const REFUSED_BANNER = {
+  auth: "meeting.transcription.refusedBanner.auth",
+  quota: "meeting.transcription.refusedBanner.quota",
+} as const;
+
 function TranscriptionLinkBanner() {
   const { t } = useI18n();
   const reconnecting = useStore((s) => s.transcriptionLink === "reconnecting");
+  const refused = useStore((s) => s.transcriptionRefusedReason);
 
   if (!reconnecting) return null;
   return (
@@ -76,7 +83,9 @@ function TranscriptionLinkBanner() {
     // readers announce the drop and the recovery without an explicit role.
     <output className="flex shrink-0 items-center gap-2 border-b border-warning-border bg-warning px-3 py-1.5 text-xs text-warning-foreground">
       <Loader2 className="size-3.5 shrink-0 animate-spin" aria-hidden />
-      <span className="min-w-0 flex-1">{t("meeting.transcription.reconnectingBanner")}</span>
+      <span className="min-w-0 flex-1">
+        {t(refused ? REFUSED_BANNER[refused] : "meeting.transcription.reconnectingBanner")}
+      </span>
     </output>
   );
 }

@@ -14,14 +14,21 @@ vi.stubGlobal("localStorage", {
 // The audio read goes through the webview asset channel (fetch(convertFileSrc)).
 vi.stubGlobal(
   "fetch",
-  vi.fn(async () => ({ arrayBuffer: async () => new ArrayBuffer(4) })),
+  vi.fn(async () => ({ blob: async () => new Blob([new Uint8Array(4)]) })),
 );
 
 vi.mock("@tauri-apps/api/core", () => ({
   convertFileSrc: (p: string) => `asset://${p}`,
-  invoke: vi.fn(async (cmd: string, args: { id: string }) => {
+  invoke: vi.fn(async (cmd: string, args: { id: string; length?: number }) => {
+    if (cmd === "history_audio_size") return audioSizes.get(args.id) ?? 4;
+    if (cmd === "read_history_audio_range") return new ArrayBuffer(args.length ?? 0);
     if (cmd !== "read_history_entry") throw new Error(`unexpected invoke ${cmd}`);
-    return { meta: { id: args.id }, audioPath: audioIds.has(args.id) ? `/a/${args.id}.ogg` : null };
+    const audio = audioIds.has(args.id);
+    return {
+      meta: { id: args.id },
+      audioPath: audio ? `/a/${args.id}.ogg` : null,
+      audioBytes: audio ? (audioBytes.get(args.id) ?? 4) : null,
+    };
   }),
 }));
 vi.mock("../tauriEvents", () => ({ isTauri: () => true }));
@@ -66,6 +73,10 @@ interface Row {
 }
 let localEntries: { id: string; createdAt: number; title: string }[] = [];
 const audioIds = new Set<string>();
+/** Recording sizes the size lookup reports (default 4 bytes). */
+const audioSizes = new Map<string, number>();
+/** On-disk audio size per id (default 4 bytes). */
+const audioBytes = new Map<string, number>();
 let cloudRows: Row[] = [];
 /** undefined = an older server that doesn't report tombstones at all. */
 let tombstones: string[] | undefined;
@@ -85,6 +96,13 @@ async function fakeCloud(
     await listGate;
     const body = tombstones === undefined ? { recordings: cloudRows } : { recordings: cloudRows, tombstones };
     return new Response(JSON.stringify(body));
+  }
+  const mp = /^\/recordings\/([^/]+)\/audio\/multipart(?:\/([^/]+)(?:\/(\d+|complete))?)?$/.exec(path);
+  if (mp) {
+    const [, , uploadId, step] = mp;
+    if (!uploadId) return new Response(JSON.stringify({ uploadId: "u1", partSize: 32 * 1024 * 1024 }));
+    if (step === "complete") return new Response(JSON.stringify({ ok: true, size: 1 }));
+    return new Response(JSON.stringify({ partNumber: Number(step), etag: `e${step}` }));
   }
   const m = /^\/recordings\/([^/]+)(\/audio|\/share)?$/.exec(path);
   if (!m) throw new Error(`unexpected ${method} ${path}`);
@@ -110,6 +128,9 @@ const history = await import("../history/history");
 beforeEach(() => {
   backing.clear();
   audioIds.clear();
+  audioSizes.clear();
+  audioBytes.clear();
+  vi.mocked(fetch).mockClear();
   localEntries = [];
   cloudRows = [];
   tombstones = undefined;
@@ -337,5 +358,31 @@ describe("following cloud deletions", () => {
     const cards = await sync.listMergedHistory();
     expect(cards.map((c) => c.id).sort()).toEqual(["ok", "ok2"]);
     expect(readSyncIndex().gone).toBeUndefined();
+  });
+});
+
+describe("audio upload", () => {
+  it("keeps the single PUT up to 64 MiB", async () => {
+    localEntries = [local("small")];
+    audioIds.add("small");
+    audioSizes.set("small", 64 * 1024 * 1024);
+    await sync.pushUnsyncedToCloud();
+    expect(calls).toContain("PUT /recordings/small/audio");
+    expect(calls.some((c) => c.includes("/multipart"))).toBe(false);
+  });
+
+  it("sends a recording over 64 MiB in 32 MiB parts, then commits the row", async () => {
+    localEntries = [local("long")];
+    audioIds.add("long");
+    audioSizes.set("long", 70 * 1024 * 1024);
+    await sync.pushUnsyncedToCloud();
+    expect(calls.filter((c) => c.includes("long"))).toEqual([
+      "POST /recordings/long/audio/multipart",
+      "PUT /recordings/long/audio/multipart/u1/1",
+      "PUT /recordings/long/audio/multipart/u1/2",
+      "PUT /recordings/long/audio/multipart/u1/3",
+      "POST /recordings/long/audio/multipart/u1/complete",
+      "POST /recordings/long",
+    ]);
   });
 });

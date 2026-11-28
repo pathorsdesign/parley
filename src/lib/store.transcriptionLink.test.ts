@@ -164,3 +164,28 @@ describe("no audio (a meeting capturing nothing opens no sessions)", () => {
     expect(useStore.getState().transcriptionNoAudioSources).toEqual([]);
   });
 });
+
+describe("a refused session (#728: Parley Cloud said no, the backend keeps redialling)", () => {
+  it("carries the reason while reconnecting and clears it once every source is live", () => {
+    useStore.getState().reportTranscriptionLink("me", "reconnecting", "quota");
+    useStore.getState().reportTranscriptionLink("them", "reconnecting", "quota");
+    expect(useStore.getState().transcriptionRefusedReason).toBe("quota");
+    report("me", "live");
+    expect(useStore.getState().transcriptionRefusedReason).toBe("quota");
+    report("them", "live");
+    expect(useStore.getState().transcriptionRefusedReason).toBeNull();
+    expect(useStore.getState().transcriptionDropped).toBe(true);
+  });
+
+  it("a plain drop after a refusal shows the plain banner again", () => {
+    useStore.getState().reportTranscriptionLink("mix", "reconnecting", "auth");
+    report("mix", "reconnecting");
+    expect(useStore.getState().transcriptionRefusedReason).toBeNull();
+  });
+
+  it("stopping clears it", () => {
+    useStore.getState().reportTranscriptionLink("mix", "reconnecting", "auth");
+    useStore.getState().stopMeeting();
+    expect(useStore.getState().transcriptionRefusedReason).toBeNull();
+  });
+});

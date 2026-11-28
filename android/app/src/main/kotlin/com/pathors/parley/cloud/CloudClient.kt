@@ -119,6 +119,12 @@ class CloudException(
     val isQuotaExhausted: Boolean get() = status == 402
     val isNotFound: Boolean get() = status == 404
 
+    /** A multipart upload id the server no longer knows (404 `no_such_upload`): start a new upload. */
+    val isNoSuchUpload: Boolean get() = status == 404 && code == NO_SUCH_UPLOAD
+
+    /** A multipart `complete` the server could not assemble (400 `invalid_parts`). */
+    val isInvalidParts: Boolean get() = status == 400 && code == INVALID_PARTS
+
     /**
      * [CloudClient.deleteAccount] was refused because the account still owns at
      * least one shared organization.
@@ -145,6 +151,12 @@ class CloudException(
     companion object {
         /** The worker's `{ error }` value behind [ownsOrganizations]. */
         const val OWNED_ORGANIZATIONS = "owned_organizations"
+
+        /** The worker's `{ error }` value behind [isNoSuchUpload]. */
+        const val NO_SUCH_UPLOAD = "no_such_upload"
+
+        /** The worker's `{ error }` value behind [isInvalidParts]. */
+        const val INVALID_PARTS = "invalid_parts"
     }
 }
 
@@ -329,6 +341,68 @@ class CloudClient(
     suspend fun uploadAudio(id: String, ogg: File) {
         val body = ogg.asRequestBody(AUDIO_OGG)
         execute(Request.Builder().url(url("recordings", id, "audio")).put(body)) { }
+    }
+
+    // ── multipart audio upload (files too big for one PUT) ───────────────────
+    //
+    // Cloudflare's edge refuses a request body over 100 MB with its own HTML 413
+    // before the Worker runs, and a live meeting passes that at about nine hours
+    // (~10.8 MB/h of Ogg/Opus) — a 14 h meeting could never leave the phone
+    // (#755). Bigger files go up in parts instead; see `MeetingUploader`.
+
+    /** `POST /recordings/{id}/audio/multipart` — open a multipart upload of the audio. */
+    suspend fun startAudioMultipart(id: String): AudioMultipartStart {
+        val request = Request.Builder()
+            .url(url("recordings", id, "audio", "multipart"))
+            .post(EMPTY_BODY)
+        val text = execute(request) { response -> bodyText(response) }
+        return CloudJson.decodeFromString(AudioMultipartStart.serializer(), text)
+    }
+
+    /**
+     * `PUT /recordings/{id}/audio/multipart/{uploadId}/{partNumber}` — the bytes
+     * `[offset, offset + length)` of [file], streamed straight from disk (never
+     * buffered whole) with an exact `Content-Length`, which the server requires.
+     *
+     * 408 means the body arrived cut short and is worth sending again; 404 with
+     * `no_such_upload` means the upload id is gone and the upload has to start
+     * over ([CloudException.isNoSuchUpload]).
+     */
+    suspend fun uploadAudioPart(
+        id: String,
+        uploadId: String,
+        partNumber: Int,
+        file: File,
+        offset: Long,
+        length: Long,
+    ): AudioPart {
+        val request = Request.Builder()
+            .url(url("recordings", id, "audio", "multipart", uploadId, partNumber.toString()))
+            .put(FileRangeRequestBody(file, offset, length, OCTET_STREAM))
+        val text = execute(request) { response -> bodyText(response) }
+        return CloudJson.decodeFromString(AudioPart.serializer(), text)
+    }
+
+    /**
+     * `POST /recordings/{id}/audio/multipart/{uploadId}/complete` with
+     * `{ parts }`. Returns the stored object's size when the server says.
+     * 400 `invalid_parts` and 404 `no_such_upload` both mean this upload cannot
+     * be finished and has to start over.
+     */
+    suspend fun completeAudioMultipart(id: String, uploadId: String, parts: List<AudioPart>): Long? {
+        val payload = CloudJson.encodeToString(AudioMultipartParts.serializer(), AudioMultipartParts(parts))
+        val request = Request.Builder()
+            .url(url("recordings", id, "audio", "multipart", uploadId, "complete"))
+            .post(payload.toRequestBody(APPLICATION_JSON))
+        val text = execute(request) { response -> bodyText(response) }
+        return runCatching {
+            CloudJson.decodeFromString(AudioMultipartComplete.serializer(), text).size
+        }.getOrNull()
+    }
+
+    /** `DELETE /recordings/{id}/audio/multipart/{uploadId}` — abort; idempotent server-side. */
+    suspend fun abortAudioMultipart(id: String, uploadId: String) {
+        execute(Request.Builder().url(url("recordings", id, "audio", "multipart", uploadId)).delete()) { }
     }
 
     /**

@@ -1,6 +1,7 @@
 import type { TranslationKey } from "../../i18n/messages";
 import type { LlmWorkload, Settings } from "../types";
 import { PROVIDER_BY_ID, parseHttpUrl } from "./providers";
+import { isRegionRefusal } from "./region";
 
 /**
  * "Test connection" for a self-hosted, OpenAI-compatible endpoint.
@@ -32,6 +33,13 @@ export interface ConnectionErrorContext {
   host: string;
   /** The model id that was tried. */
   model: string;
+  /**
+   * Registry id of the provider tested ("openai", "custom", …). Region
+   * refusals are recognised per provider, so without it none is.
+   */
+  provider?: string;
+  /** Its display name ("Claude"), for the region message. */
+  providerLabel?: string;
 }
 
 export type ConnectionTestResult =
@@ -48,7 +56,7 @@ export type ConnectionTestResult =
  */
 export function classifyConnectionError(
   err: unknown,
-  { host, model }: ConnectionErrorContext
+  { host, model, provider, providerLabel }: ConnectionErrorContext
 ): ConnectionErrorMessage {
   const chain = errorChain(err);
   const text = chain.map(describe).filter(Boolean).join(" ").toLowerCase();
@@ -63,6 +71,12 @@ export function classifyConnectionError(
   // "the server answered, and said no".
   if (status === undefined && looksUnreachable(chain, text)) {
     return { key: "settings.provider.test.unreachable", vars: { host } };
+  }
+
+  // The provider refused where the request comes from (HK / mainland China),
+  // not the key: checked before the 401/403 branch so it isn't read as one.
+  if (provider && isRegionRefusal(provider, status, text)) {
+    return { key: "ai.fail.regionUnsupported", vars: { provider: providerLabel ?? provider } };
   }
 
   if (status === 401 || status === 403) return { key: "settings.provider.test.rejectedKey" };
@@ -102,9 +116,14 @@ export async function runConnectionTest(
   const startedAt = Date.now();
 
   try {
-    const [{ generateText }, { getModel }] = await Promise.all([import("ai"), import("./provider")]);
+    const [{ generateText }, { getModel }, { aiTask }] = await Promise.all([
+      import("ai"),
+      import("./provider"),
+      import("./tasks/catalog"),
+    ]);
     await generateText({
-      model: getModel(settings, workload),
+      // Hosted: the `ping` task, which the server answers itself.
+      model: getModel(settings, workload, { task: aiTask("ping") }),
       prompt: "Reply with OK.",
       // Just enough to prove a completion came back; nobody reads the answer.
       maxOutputTokens: 8,
@@ -113,7 +132,8 @@ export async function runConnectionTest(
     });
     return { ok: true, model, ms: Date.now() - startedAt };
   } catch (err) {
-    return { ok: false, error: classifyConnectionError(err, { host, model }) };
+    const providerLabel = PROVIDER_BY_ID[provider]?.label ?? provider;
+    return { ok: false, error: classifyConnectionError(err, { host, model, provider, providerLabel }) };
   } finally {
     globalThis.clearTimeout(timer);
   }

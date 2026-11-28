@@ -19,6 +19,8 @@ import { askAboutMeeting } from "./ask";
 import { generatePostMeetingReport } from "./report";
 import { checkTodos } from "./todos";
 import { generateObjectResilient, streamObjectResilient } from "./generate";
+import { createAgendaCursor, cursorForMeeting } from "../meeting/agendaDelta";
+import { aiTask } from "./tasks/catalog";
 
 function settingsFor(provider: LlmProvider, extra: Record<string, string> = {}): Settings {
   return {
@@ -95,12 +97,18 @@ const segments = [seg({ text: "We agreed to ship on Friday." })];
 beforeEach(() => vi.clearAllMocks());
 afterEach(() => vi.unstubAllGlobals());
 
+const urls = (spy: ReturnType<typeof stubFetch>) => spy.mock.calls.map(([input]) => String(input));
+const clients = (spy: ReturnType<typeof stubFetch>) =>
+  spy.mock.calls.map(([, init]) => new Headers(init?.headers).get("x-parley-client"));
+
 describe("X-Parley-Feature on Parley Cloud", () => {
-  it("tags Ask as ask", async () => {
+  it("sends Ask to the ask task, tagged ask", async () => {
     const spy = stubFetch("Friday.");
     await askAboutMeeting({ settings: hosted, segments, question: "When?", onDelta: () => {} });
-    expect(String(spy.mock.calls[0][0])).toBe("https://cloud.example.test/v1/chat/completions");
+    expect(urls(spy)).toEqual(["https://cloud.example.test/v1/ai/ask/chat/completions"]);
+    expect(bodies(spy)[0].parley_task).toEqual({ version: 1, params: {}, slots: {} });
     expect(features(spy)).toEqual(["ask"]);
+    expect(clients(spy)[0]).toMatch(/^(macos|windows|linux)\/\d+\.\d+\.\d+/);
   });
 
   it("tags the post-meeting report as report", async () => {
@@ -112,6 +120,8 @@ describe("X-Parley-Feature on Parley Cloud", () => {
       todos: [],
       onDelta: () => {},
     });
+    expect(urls(spy)).toEqual(["https://cloud.example.test/v1/ai/report/chat/completions"]);
+    expect(bodies(spy)[0].parley_task.params).toEqual({ lens: "decision", language: "en" });
     expect(features(spy)).toEqual(["report"]);
   });
 
@@ -123,51 +133,63 @@ describe("X-Parley-Feature on Parley Cloud", () => {
       todos: [{ id: "t1", text: "Agree a ship date", done: false }],
     });
     expect(done).toEqual([{ id: "t1", atMs: 5_000 }]);
+    expect(urls(spy)).toEqual(["https://cloud.example.test/v1/ai/todos/chat/completions"]);
+    expect(bodies(spy)[0].parley_task.params).toEqual({ scope: "full" });
     expect(features(spy)).toEqual(["meeting"]);
   });
 
   /** Groq's strict json_schema 400 sends the call round again in json_object
-   *  mode; the retry is the same feature's spend. */
-  it("keeps the tag on the json_object retry", async () => {
+   *  mode; the retry is the same task. */
+  it("keeps the task and the tag on the json_object retry", async () => {
     const spy = stubFetch('{"a":"ok"}', refused);
     const res = await generateObjectResilient({
       settings: hosted,
       workload: "realtime",
-      feature: "meeting",
+      task: aiTask("find_name_edit"),
       schema: z.object({ a: z.string() }),
       system: "Reply in json.",
       prompt: "p",
     });
     expect(res.object).toEqual({ a: "ok" });
     expect(bodies(spy).map((b) => b.response_format?.type)).toEqual(["json_schema", "json_object"]);
+    expect(urls(spy)).toEqual(Array(2).fill("https://cloud.example.test/v1/ai/find_name_edit/chat/completions"));
+    expect(bodies(spy).map((b) => b.parley_task)).toEqual(Array(2).fill({ version: 1, params: {}, slots: {} }));
     expect(features(spy)).toEqual(["meeting", "meeting"]);
   });
 
-  it("keeps the tag on a streamed call's non-streamed fallback", async () => {
+  it("keeps the task and the tag on a streamed call's non-streamed fallback", async () => {
     const spy = stubFetch('{"a":"ok"}', refused);
     const res = await streamObjectResilient({
       settings: hosted,
       workload: "deep",
-      feature: "meeting",
+      task: aiTask("timeline", { lens: "decision", mode: "replay", language: "en" }),
       schema: z.object({ a: z.string() }),
       system: "Reply in json.",
       prompt: "p",
     });
     expect(res.object).toEqual({ a: "ok" });
     expect(bodies(spy).map((b) => b.stream ?? false)).toEqual([true, false]);
+    expect(urls(spy)).toEqual(Array(2).fill("https://cloud.example.test/v1/ai/timeline/chat/completions"));
+    expect(bodies(spy).map((b) => b.parley_task.params.mode)).toEqual(["replay", "replay"]);
     expect(features(spy)).toEqual(["meeting", "meeting"]);
   });
 
-  it("sends no tag when the caller names no feature", async () => {
+  it("sends the task's slots with it", async () => {
     const spy = stubFetch('{"a":"ok"}');
     await generateObjectResilient({
       settings: hosted,
       workload: "realtime",
+      task: aiTask("polish", { style: "concise" }, { terms: ["Parley"], customInstructions: "Formal." }),
       schema: z.object({ a: z.string() }),
       system: "Reply in json.",
       prompt: "p",
     });
-    expect(features(spy)).toEqual([null]);
+    expect(bodies(spy)[0].parley_task).toEqual({
+      version: 1,
+      params: { style: "concise" },
+      slots: { terms: ["Parley"], customInstructions: "Formal." },
+    });
+    expect(features(spy)).toEqual(["voice_typing"]);
   });
 });
 
@@ -179,6 +201,8 @@ describe("X-Parley-Feature on a BYOK provider", () => {
     await askAboutMeeting({ settings: byok, segments, question: "When?", onDelta: () => {} });
     expect(String(spy.mock.calls[0][0])).toMatch(/^https:\/\/api\.groq\.com\//);
     expect(features(spy)).toEqual([null]);
+    expect(clients(spy)).toEqual([null]);
+    expect(bodies(spy)[0].parley_task).toBeUndefined();
   });
 
   it("is not sent by meeting analysis", async () => {
@@ -233,5 +257,89 @@ describe("checkTodos: which items were covered, and where", () => {
       todos: [{ id: "t1", text: BUDGET, done: false, aiDismissed: true }],
     });
     expect(spy).not.toHaveBeenCalled();
+  });
+});
+
+/** The live meeting's pass (with a cursor) reads only what is new since the
+ *  last answered pass — pathorsAI/parley-internal#100. */
+describe("checkTodos with the live meeting's cursor", () => {
+  const todos = [
+    { id: "t1", text: "Confirm the budget", done: false },
+    { id: "t2", text: "Agree the timeline", done: false },
+  ];
+  const line = (n: number, text = `line number ${n}`) =>
+    seg({ id: `s${n}`, text, startMs: n * 10_000, endMs: n * 10_000 + 5_000 });
+  const upTo = (n: number) => Array.from({ length: n }, (_, i) => line(i + 1));
+  const prompt = (spy: ReturnType<typeof stubFetch>, i: number) => JSON.stringify(bodies(spy)[i].messages);
+  const unauthorized = () =>
+    new Response(JSON.stringify({ error: { message: "nope" } }), {
+      status: 401,
+      headers: { "content-type": "application/json" },
+    });
+
+  it("sends only the new lines, after a few earlier ones for context", async () => {
+    const cursor = createAgendaCursor("m1");
+    const spy = stubFetch('{"done":[]}');
+    await checkTodos({ settings: hosted, segments: upTo(10), todos, cursor });
+    await checkTodos({ settings: hosted, segments: upTo(12), todos, cursor });
+    const second = prompt(spy, 1);
+    expect(second).toContain("line number 11");
+    expect(second).toContain("line number 12");
+    expect(second).toContain("line number 7"); // context, before the boundary
+    expect(second).not.toContain("line number 6");
+    expect(second).toContain("New since the last check");
+  });
+
+  it("makes no call when nothing new was said", async () => {
+    const cursor = createAgendaCursor("m1");
+    const spy = stubFetch('{"done":[]}');
+    await checkTodos({ settings: hosted, segments: upTo(3), todos, cursor });
+    const silent = [...upTo(3), seg({ id: "s4", text: "typing…", isFinal: false, startMs: 40_000 })];
+    await checkTodos({ settings: hosted, segments: silent, todos, cursor });
+    expect(spy).toHaveBeenCalledTimes(1);
+  });
+
+  it("makes no call when every item is covered", async () => {
+    const cursor = createAgendaCursor("m1");
+    const spy = stubFetch('{"done":[]}');
+    await checkTodos({ settings: hosted, segments: upTo(3), todos: todos.map((t) => ({ ...t, done: true })), cursor });
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it("does not advance past lines a failed call never delivered", async () => {
+    const cursor = createAgendaCursor("m1");
+    stubFetch('{"done":[]}');
+    await checkTodos({ settings: hosted, segments: upTo(2), todos, cursor });
+    vi.stubGlobal("fetch", vi.fn(async () => unauthorized()));
+    await expect(checkTodos({ settings: hosted, segments: upTo(4), todos, cursor })).rejects.toThrow();
+    const spy = stubFetch('{"done":[{"id":"t1","at":"0:30"}]}');
+    const done = await checkTodos({ settings: hosted, segments: upTo(5), todos, cursor });
+    expect(done).toEqual([{ id: "t1", atMs: 30_000 }]);
+    const retry = prompt(spy, 0);
+    for (const n of [3, 4, 5]) expect(retry).toContain(`line number ${n}`);
+  });
+
+  it("an item covered across the boundary still has its opening line in view", async () => {
+    const cursor = createAgendaCursor("m1");
+    const spy = stubFetch('{"done":[]}');
+    const opening = line(2, "About the budget, let me check with finance.");
+    await checkTodos({ settings: hosted, segments: [line(1), opening], todos, cursor });
+    await checkTodos({ settings: hosted, segments: [line(1), opening, line(3, "Yes, it is approved.")], todos, cursor });
+    const second = prompt(spy, 1);
+    expect(second).toContain("let me check with finance");
+    expect(second).toContain("it is approved");
+  });
+
+  it("starts over for a new meeting", async () => {
+    let cursor = cursorForMeeting(null, "m1");
+    const spy = stubFetch('{"done":[]}');
+    await checkTodos({ settings: hosted, segments: upTo(3), todos, cursor });
+    cursor = cursorForMeeting(cursor, "m1"); // resume: same place
+    await checkTodos({ settings: hosted, segments: upTo(3), todos, cursor });
+    expect(spy).toHaveBeenCalledTimes(1);
+    cursor = cursorForMeeting(cursor, "m2"); // a new meeting, same ids by chance
+    await checkTodos({ settings: hosted, segments: upTo(3), todos, cursor });
+    expect(spy).toHaveBeenCalledTimes(2);
+    expect(prompt(spy, 1)).toContain("line number 1");
   });
 });

@@ -1,0 +1,5 @@
+Very long meetings now reach the cloud, and long files import in parts.
+
+- **Recordings over 64 MB upload in parts** (#776). A live meeting longer than about 9 hours used to exceed the cloud's 100 MB request limit; the upload was refused, and because the recording's details are only sent after its audio, the whole meeting stayed on the phone (#755). Large recordings now go up in 32 MB parts, and a part that fails is retried on its own.
+- **Long imports are split before they upload** (#749). With Parley Cloud transcription, a file longer than 5 h 50 min, past what one hosted transcription session accepts, is split into equal parts after you confirm. Each part becomes its own recording, "name (1/2)", "name (2/2)". Before, the import failed partway through with a misleading "quota used up" message and nothing was saved.
+- **A refused re-transcription no longer blocks the queue** (#749). A backfill the cloud refuses as too large is dropped instead of holding up every recording queued behind it.

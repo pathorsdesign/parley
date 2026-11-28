@@ -9,8 +9,12 @@
 //! Unlike the iOS `ReconnectPolicy` there is no attempt ceiling. A desktop
 //! meeting can run for hours, and the whole point is to pick the transcript
 //! back up whenever the network returns; a handshake that fails while offline
-//! costs nothing, and a failure a redial cannot fix (quota, a rejected key) is
-//! classified as fatal before it ever reaches this ladder.
+//! costs nothing. Only a failure no redial can fix — a rejected BYOK key, an
+//! unsupported region, a broken on-device model — ends transcription, and it
+//! says so (see [`redial_for`]). A hosted refusal (`auth` / `quota`) used to
+//! be one of those, and with it a meeting whose redial was turned down once
+//! sat out the rest of the call with no transcript (#728). It now redials on
+//! the slower [`ReconnectPolicy::REFUSED`] ladder and tells the meeting UI why.
 //!
 //! What IS bounded is redialling for nothing. Every hosted leg that completes
 //! its handshake holds an upstream recognizer socket, whether or not it ever
@@ -78,7 +82,45 @@ pub fn leg_is_idle(
     quiet >= limit
 }
 
+/// What a meeting does after a leg ends with a failure, by its code (see
+/// `transcription::error::session_error_code`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Redial {
+    /// A connection failure: redial on [`ReconnectPolicy::MEETING`].
+    Soon,
+    /// Parley Cloud turned the session down (`auth` = it did not accept the
+    /// session token, `quota` = the per-session cap, the session watchdog or
+    /// the account quota). Each of those can lift while the meeting runs — a
+    /// cap is per session, a lookup can fail transiently, a quota can be
+    /// topped up — and the handshake that refuses costs the server one read,
+    /// so redial on [`ReconnectPolicy::REFUSED`] and show the reason.
+    Later,
+    /// Nothing a redial can change (a rejected BYOK key, an unsupported
+    /// region, an on-device model that is missing or out of memory): report it
+    /// once and end transcription; the recording carries on.
+    Never,
+}
+
+/// The [`Redial`] class of a failure code.
+pub fn redial_for(code: &str) -> Redial {
+    match code {
+        "connect" => Redial::Soon,
+        "auth" | "quota" => Redial::Later,
+        _ => Redial::Never,
+    }
+}
+
 impl ReconnectPolicy {
+    /// A refused session ([`Redial::Later`]): 30 s, 60 s, 120 s, 240 s, then
+    /// every five minutes for as long as the meeting records. Slow on purpose —
+    /// a refusal is a decision, not a blip — but never a give-up.
+    pub const REFUSED: Self = Self {
+        base: Duration::from_secs(30),
+        cap: Duration::from_secs(300),
+        reset_after: Duration::from_secs(30),
+        jitter: 0.2,
+    };
+
     /// The meeting ladder: 1, 2, 4, 8, 15, 15, … seconds.
     pub const MEETING: Self = Self {
         base: Duration::from_secs(1),
@@ -202,6 +244,36 @@ mod tests {
             let d = p.jittered(secs(15), i as f64 / 100.0);
             assert!(d >= secs(12) && d <= secs(18), "{d:?}");
         }
+    }
+
+    #[test]
+    fn only_a_failure_no_redial_can_fix_ends_transcription() {
+        assert_eq!(redial_for("connect"), Redial::Soon);
+        // #728: a hosted refusal used to end the live transcript for good.
+        assert_eq!(redial_for("auth"), Redial::Later);
+        assert_eq!(redial_for("quota"), Redial::Later);
+        for code in ["key", "region", "local", "local-missing", "local-memory"] {
+            assert_eq!(redial_for(code), Redial::Never, "{code}");
+        }
+    }
+
+    #[test]
+    fn a_refused_session_redials_slowly_but_forever() {
+        let p = ReconnectPolicy::REFUSED;
+        let ladder: Vec<Duration> = (1..=6).map(|a| p.delay(a)).collect();
+        assert_eq!(
+            ladder,
+            vec![secs(30), secs(60), secs(120), secs(240), secs(300), secs(300)]
+        );
+        assert_eq!(p.delay(u32::MAX), secs(300));
+        // A refused handshake dies in well under a second: it keeps climbing.
+        let mut attempt = 0;
+        for expected in 1..=8 {
+            attempt = p.next_attempt(attempt, Duration::from_millis(300), true);
+            assert_eq!(attempt, expected);
+        }
+        // Jitter never pushes a refusal redial past six minutes.
+        assert!(p.jittered(p.delay(attempt), 1.0) <= secs(360));
     }
 
     #[test]

@@ -18,6 +18,7 @@ mod model_download;
 mod notify_sender;
 mod permissions;
 mod playback;
+mod quit;
 mod recording_journal;
 mod replay;
 mod replay_audio;
@@ -223,6 +224,7 @@ pub fn run() {
             commands::meeting::stop_meeting,
             commands::meeting::cancel_meeting,
             commands::meeting::set_meeting_paused,
+            commands::meeting::set_meeting_mic_muted,
             commands::export::discard_recording,
             commands::mic_test::list_input_devices,
             commands::mic_test::start_mic_test,
@@ -278,12 +280,17 @@ pub fn run() {
             hotkey::voice_typing_hotkey_status,
             replay::transcribe_file,
             replay::measure_audio_speech_rate,
+            replay::probe_upload_audio,
+            replay::split_upload_audio,
+            replay::discard_upload_parts,
             diarize::diarize_audio,
             history::save_history_entry,
             history::save_remote_history_entry,
             history::download_remote_audio,
             history::list_history,
             history::read_history_entry,
+            history::history_audio_size,
+            history::read_history_audio_range,
             history::rename_history_entry,
             history::delete_history_entry,
             history::read_transcript_file,
@@ -310,7 +317,8 @@ pub fn run() {
             autostart::mark_show_on_next_launch,
             autostart::clear_show_on_next_launch,
             tray::tray_active,
-            tray::set_tray_labels
+            tray::set_tray_labels,
+            quit::quit_acknowledged
         ])
         .build(tauri::generate_context!())
         .expect("error while running tauri application")

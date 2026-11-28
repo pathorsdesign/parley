@@ -168,6 +168,40 @@ data class PushResponse(
 )
 
 /**
+ * `POST /recordings/{id}/audio/multipart` → `{ uploadId, partSize }`: an open
+ * multipart upload of the recording's audio, and the part size the server
+ * expects every part but the last to have.
+ */
+@Serializable
+data class AudioMultipartStart(
+    val uploadId: String,
+    val partSize: Long,
+)
+
+/**
+ * One uploaded part — what `PUT …/multipart/{uploadId}/{partNumber}` answers
+ * and what `…/complete` takes back, in a list, as `{ parts: [...] }`.
+ */
+@Serializable
+data class AudioPart(
+    val partNumber: Int,
+    val etag: String,
+)
+
+/** `POST …/multipart/{uploadId}/complete` → `{ ok, size }`. */
+@Serializable
+data class AudioMultipartComplete(
+    val ok: Boolean = false,
+    val size: Long? = null,
+)
+
+/** The `complete` request body. */
+@Serializable
+internal data class AudioMultipartParts(
+    val parts: List<AudioPart>,
+)
+
+/**
  * A folder, personal or an organization's — iOS `CloudFolder`, desktop
  * `CloudFolder` (`src/lib/cloud/types.ts`).
  *

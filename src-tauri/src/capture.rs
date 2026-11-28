@@ -28,7 +28,7 @@ use crate::audio::AudioSource;
 use crate::transcription::bridge::SttBridge;
 use crate::transcription::common::{LevelMeter, LEVEL_EVENT, TRANSCRIPTION_STATE_EVENT};
 use crate::transcription::error::session_error_code;
-use crate::transcription::reconnect::{leg_is_idle, ReconnectPolicy, LEG_IDLE};
+use crate::transcription::reconnect::{leg_is_idle, redial_for, Redial, ReconnectPolicy, LEG_IDLE};
 use crate::transcription::{self, SttProvider, TranscribeConfig};
 
 /// Grace given to capture threads to release their device on stop. Threads
@@ -495,9 +495,11 @@ pub struct MeteredSession {
     /// `meeting://transcription` `{ source, state: "reconnecting", attempt }`,
     /// backs off along [`ReconnectPolicy::MEETING`] and redials, and the new
     /// leg announces `{ source, state: "live", leg }` once its handshake
-    /// completes. Only a failure a redial cannot fix (`quota` / `auth` /
-    /// `key`) still raises `error_event`, and it ends transcription without
-    /// ending the recording. Voice typing passes `false` and keeps the
+    /// completes. A hosted refusal (`auth` / `quota`) redials too, on the
+    /// slower [`ReconnectPolicy::REFUSED`] ladder, and its `reconnecting`
+    /// events carry `reason` so the meeting UI can say why (#728). Only a
+    /// failure no redial can fix (a BYOK `key`, `region`, an on-device model)
+    /// still raises `error_event`. Voice typing passes `false` and keeps the
     /// single-shot behaviour: one session, and any failure raises
     /// `error_event`.
     pub reconnect: bool,
@@ -736,17 +738,14 @@ async fn run_legs(
     paused: Option<&Arc<AtomicBool>>,
     failure: &Failure<'_>,
 ) {
-    let policy = ReconnectPolicy::MEETING;
     let is_paused = || paused.is_some_and(|p| p.load(Ordering::SeqCst));
     let mut leg: u32 = 0;
     let mut attempt: u32 = 0;
     // The backoff owed before the next dial: `Some` after a failure, `None`
     // after the client closed an idle leg itself (nothing failed).
-    let mut backoff: Option<Duration> = None;
+    let mut backoff: Option<Backoff> = None;
     loop {
-        if leg > 0
-            && !ready_to_redial(app, label, bridge, &is_paused, backoff.take(), attempt).await
-        {
+        if leg > 0 && !ready_to_redial(app, label, bridge, &is_paused, backoff.take()).await {
             return;
         }
         // The bridge decides the offset, because the bridge is what knows
@@ -795,25 +794,61 @@ async fn run_legs(
             leg += 1;
             continue;
         }
-        // Drained without a stop or a park (the input closed some other way),
-        // or a failure a redial cannot fix: nothing to redial for.
-        let Some(msg) = redialable_failure(result, bridge, label, leg, failure) else {
+        // The meeting is stopping, or a failure no redial can fix (reported
+        // there): nothing to redial for.
+        let Some(ended) = redialable_failure(result, bridge, label, leg, failure) else {
             return;
         };
 
         // Keep the words spoken from here on for the next leg.
         bridge.hold();
-        attempt = policy.next_attempt(attempt, lived, carried_audio);
-        let delay = policy.jittered(policy.delay(attempt), jitter_unit());
-        log::warn!(
-            "[stt:{label}] leg {leg} dropped after {:.1}s ({}): {msg} — redial #{attempt} in {:.1}s",
-            lived.as_secs_f64(),
-            if carried_audio { "carried audio" } else { "no audio" },
-            delay.as_secs_f64()
-        );
-        backoff = Some(delay);
+        backoff = Some(backoff_after_drop(&ended, &mut attempt, lived, carried_audio, label, leg));
         leg += 1;
     }
+}
+
+/// The backoff a dropped leg owes before the next dial: the refused ladder
+/// when the server said no (auth / quota), the meeting ladder otherwise.
+/// Advances `attempt` and logs the drop.
+fn backoff_after_drop(
+    ended: &LegDrop,
+    attempt: &mut u32,
+    lived: Duration,
+    carried_audio: bool,
+    label: &str,
+    leg: u32,
+) -> Backoff {
+    let policy = if ended.refused.is_some() {
+        ReconnectPolicy::REFUSED
+    } else {
+        ReconnectPolicy::MEETING
+    };
+    *attempt = policy.next_attempt(*attempt, lived, carried_audio);
+    let delay = policy.jittered(policy.delay(*attempt), jitter_unit());
+    log::warn!(
+        "[stt:{label}] leg {leg} dropped after {:.1}s ({}): {} — redial #{} in {:.1}s",
+        lived.as_secs_f64(),
+        if carried_audio { "carried audio" } else { "no audio" },
+        ended.msg,
+        *attempt,
+        delay.as_secs_f64()
+    );
+    Backoff {
+        delay,
+        attempt: *attempt,
+        reason: ended.refused,
+    }
+}
+
+/// The wait a failed leg owes before the next dial.
+struct Backoff {
+    delay: Duration,
+    /// The consecutive redial this will be (1-based), for the UI.
+    attempt: u32,
+    /// `Some("auth" | "quota")` when Parley Cloud refused the session: the
+    /// meeting UI says why the transcript stopped instead of a plain
+    /// "reconnecting".
+    reason: Option<&'static str>,
 }
 
 /// Before every leg after the first: wait until audio is held for it, then
@@ -824,20 +859,29 @@ async fn ready_to_redial(
     label: &'static str,
     bridge: &SttBridge,
     is_paused: &impl Fn() -> bool,
-    backoff: Option<Duration>,
-    attempt: u32,
+    backoff: Option<Backoff>,
 ) -> bool {
     // Never dial without something to transcribe.
     if !wait_for_audio(app, label, bridge, is_paused).await {
         log::info!("[stt:{label}] capture ended while waiting for audio");
         return false;
     }
-    let Some(delay) = backoff else {
+    let Some(Backoff {
+        delay,
+        attempt,
+        reason,
+    }) = backoff
+    else {
         return true;
     };
     let _ = app.emit(
         TRANSCRIPTION_STATE_EVENT,
-        serde_json::json!({ "source": label, "state": "reconnecting", "attempt": attempt }),
+        serde_json::json!({
+            "source": label,
+            "state": "reconnecting",
+            "attempt": attempt,
+            "reason": reason,
+        }),
     );
     tokio::select! {
         _ = tokio::time::sleep(delay) => true,
@@ -881,35 +925,65 @@ async fn drive_leg(
     }
 }
 
-/// The failure message when a leg's end is one to redial after; `None` when
-/// it is not: it drained normally, the failure is one a redial cannot fix
-/// (reported here), or the meeting is stopping.
+/// A leg's end that is redialled: why it ended, and the refusal code when
+/// Parley Cloud turned the session down (redialled on the slow ladder).
+struct LegDrop {
+    msg: String,
+    refused: Option<&'static str>,
+}
+
+/// Whether a leg's end is one to redial after; `None` when the meeting is
+/// stopping or the failure is one no redial can fix (reported here).
+///
+/// While the capture runs, every other end is redialled — including a leg
+/// that returned cleanly without a stop or an idle park, which used to end
+/// live transcription silently for the rest of the meeting.
 fn redialable_failure(
     result: anyhow::Result<()>,
     bridge: &SttBridge,
     label: &'static str,
     leg: u32,
     failure: &Failure<'_>,
-) -> Option<String> {
-    let e = result.err()?;
-    let msg = e.to_string();
-    let code = failure.classify(&e);
-    if code != "connect" {
-        // Quota, an expired session, a rejected key: the next handshake
-        // would be refused the same way. Say so once and stop holding
-        // audio nobody will read — the recording carries on regardless.
-        log::warn!("[stt:{label}] leg {leg} ended ({code}), not redialling: {msg}");
-        bridge.discard();
-        failure.report(code, &msg);
-        return None;
-    }
+) -> Option<LegDrop> {
     if bridge.is_closed() || failure.muted() {
         // The meeting is stopping, and this is just its socket going down
         // with it (or dying inside the flush grace). Nothing to redial for.
-        log::info!("[stt:{label}] leg {leg} ended after stop: {msg}");
+        if let Err(e) = &result {
+            log::info!("[stt:{label}] leg {leg} ended after stop: {e}");
+        }
         return None;
     }
-    Some(msg)
+    let e = match result {
+        Ok(()) => {
+            log::warn!("[stt:{label}] leg {leg} ended without a stop while capturing; redialling");
+            return Some(LegDrop {
+                msg: "the leg ended without a stop".into(),
+                refused: None,
+            });
+        }
+        Err(e) => e,
+    };
+    let msg = e.to_string();
+    let code = failure.classify(&e);
+    match redial_for(code) {
+        Redial::Soon => Some(LegDrop { msg, refused: None }),
+        Redial::Later => {
+            log::warn!("[stt:{label}] leg {leg} refused ({code}); redialling slowly: {msg}");
+            Some(LegDrop {
+                msg,
+                refused: Some(code),
+            })
+        }
+        Redial::Never => {
+            // A rejected key, an unsupported region, a broken local model:
+            // the next handshake would fail the same way. Say so once and
+            // stop holding audio nobody will read — the recording carries on.
+            log::warn!("[stt:{label}] leg {leg} ended ({code}), not redialling: {msg}");
+            bridge.discard();
+            failure.report(code, &msg);
+            None
+        }
+    }
 }
 
 /// How often a live leg checks whether it has gone idle (see [`LEG_IDLE`]).

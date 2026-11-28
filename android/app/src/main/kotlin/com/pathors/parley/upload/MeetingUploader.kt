@@ -1,6 +1,7 @@
 package com.pathors.parley.upload
 
 import android.content.Context
+import com.pathors.parley.cloud.AudioPart
 import com.pathors.parley.cloud.CloudClient
 import com.pathors.parley.cloud.CloudException
 import com.pathors.parley.cloud.RecordingMeta
@@ -135,7 +136,9 @@ data class DrainResult(
  * offline upload simply waits for the next drain. The two cloud steps run in the
  * one order every Parley client uses:
  *
- * 1. `PUT /recordings/{id}/audio` — the Ogg/Opus blob.
+ * 1. `PUT /recordings/{id}/audio` — the Ogg/Opus blob; or, for a file over
+ *    64 MiB, the multipart upload under `…/audio/multipart` (see
+ *    [AudioUploadPlan] — the edge refuses a body over 100 MB).
  * 2. `POST /recordings/{id}` — `{ summary, meta }`.
  *
  * A summary claiming `hasAudio` must never reach the server before its blob, or
@@ -206,6 +209,8 @@ class MeetingUploader(
     private val onSyncAttempt: (id: String, failure: Throwable?) -> Unit = { _, _ -> },
     /** Wall clock, epoch milliseconds — stamps and schedules parked uploads. */
     private val now: () -> Long = System::currentTimeMillis,
+    /** When audio goes up in parts, and how big they are. See [AudioUploadPlan]. */
+    private val audioPlan: AudioUploadPlan = AudioUploadPlan(),
 ) {
     private val drainMutex = Mutex()
 
@@ -323,6 +328,10 @@ class MeetingUploader(
         drainMutex.withLock {
             withContext(Dispatchers.IO) { queue.remove(id) }
             pushesAttempted -= id
+            // An open multipart upload is left to expire server-side (R2 drops
+            // incomplete uploads after 7 days); a delete must not wait on the network.
+            multipartUploads -= id
+            audioUploaded -= id
         }
         noteAttempt(id, null)
     }
@@ -416,6 +425,8 @@ class MeetingUploader(
         }
         withContext(Dispatchers.IO) { queue.remove(item.id) }
         pushesAttempted -= item.id
+        multipartUploads -= item.id
+        audioUploaded -= item.id
         return sharedTo
     }
 
@@ -516,11 +527,21 @@ class MeetingUploader(
         audio.deleteQuietly()
     }
 
-    private suspend fun uploadWithRetry(pending: PendingUpload, audio: File): String? {
+    private suspend fun uploadWithRetry(pending: PendingUpload, audio: File): String? =
+        withRetry { upload(pending, audio) }
+
+    /**
+     * [block] with the uploader's retry rules: [maxAttempts] tries, [retryDelay]
+     * between them, and only for failures retrying can fix — a retryable
+     * [CloudException] (5xx, 408, 429, never-reached-HTTP) or a bare
+     * [IOException]. Used for a whole upload and, inside a multipart one, for
+     * each part.
+     */
+    private suspend fun <T> withRetry(block: suspend () -> T): T {
         var attempt = 0
         while (true) {
             try {
-                return upload(pending, audio)
+                return block()
             } catch (e: CloudException) {
                 if (!e.isRetryable || attempt >= maxAttempts - 1) throw e
             } catch (e: IOException) {
@@ -540,9 +561,114 @@ class MeetingUploader(
      *   none to make or the organization refused it.
      */
     private suspend fun upload(pending: PendingUpload, audio: File): String? {
-        cloud.uploadAudio(pending.id, audio)
+        uploadAudio(pending.id, audio)
         pushMeta(pending)
         return pending.shareOrgId?.takeIf { shareIfAsked(pending) }
+    }
+
+    /**
+     * The audio half of [upload]: one `PUT` up to [AudioUploadPlan.thresholdBytes],
+     * a multipart upload above it (the edge refuses a body over 100 MB, #755).
+     */
+    private suspend fun uploadAudio(id: String, audio: File) {
+        val size = withContext(Dispatchers.IO) { audio.length() }
+        if (!audioPlan.usesMultipart(size)) {
+            cloud.uploadAudio(id, audio)
+            return
+        }
+        // A retry of the whole upload after the audio is already in (the meta
+        // push failed, a share was retried) must not send 150 MB again.
+        if (audioUploaded[id] == size) return
+        uploadAudioInParts(id, audio, size)
+        audioUploaded[id] = size
+    }
+
+    /**
+     * A multipart upload in progress, kept for the life of this process so that
+     * a retried upload — the next attempt in this pass, or a later drain — sends
+     * only the parts that have not gone up yet. Deliberately not persisted: a
+     * process that dies starts the upload again on its next drain, which costs
+     * bytes and never correctness. Only touched under [drainMutex].
+     */
+    private class MultipartProgress(
+        val uploadId: String,
+        val sizeBytes: Long,
+        val parts: List<AudioUploadPlan.Part>,
+    ) {
+        val etags = sortedMapOf<Int, String>()
+
+        fun uploaded(): List<AudioPart> = etags.map { (number, etag) -> AudioPart(number, etag) }
+    }
+
+    /** See [MultipartProgress]. Only touched under [drainMutex]. */
+    private val multipartUploads = mutableMapOf<String, MultipartProgress>()
+
+    /**
+     * Recordings whose multipart audio upload completed in this process, with
+     * the file size it completed at. Only touched under [drainMutex].
+     */
+    private val audioUploaded = mutableMapOf<String, Long>()
+
+    /**
+     * Start (or carry on) a multipart upload of [audio], send each missing part
+     * with the uploader's retry rules, then complete it.
+     *
+     * An upload id the server no longer knows (404 `no_such_upload`, at a part
+     * or at `complete`) or a `complete` it could not assemble (400
+     * `invalid_parts`) starts the upload over once within this call; a second
+     * time is thrown like any other refusal, and parks the recording. 410 (the
+     * recording was deleted) is never caught here: it goes out exactly as it
+     * does for the single PUT.
+     */
+    private suspend fun uploadAudioInParts(id: String, audio: File, size: Long) {
+        var restarted = false
+        while (true) {
+            val progress = multipartProgress(id, size)
+            try {
+                sendMissingPartsAndComplete(id, audio, progress)
+                multipartUploads -= id
+                return
+            } catch (e: CloudException) {
+                if (restarted || !(e.isNoSuchUpload || e.isInvalidParts)) throw e
+                multipartUploads -= id
+                if (e.isInvalidParts) abortQuietly(id, progress.uploadId)
+                restarted = true
+            }
+        }
+    }
+
+    /** This process's upload of [id] at this size, or a newly started one. */
+    private suspend fun multipartProgress(id: String, size: Long): MultipartProgress =
+        multipartUploads[id]?.takeIf { it.sizeBytes == size }
+            ?: withRetry { cloud.startAudioMultipart(id) }.let { started ->
+                MultipartProgress(
+                    uploadId = started.uploadId,
+                    sizeBytes = size,
+                    parts = audioPlan.parts(size, audioPlan.partSizeFor(started.partSize)),
+                ).also { multipartUploads[id] = it }
+            }
+
+    /** Upload every part not yet acknowledged (recording each etag as it lands), then complete. */
+    private suspend fun sendMissingPartsAndComplete(id: String, audio: File, progress: MultipartProgress) {
+        for (part in progress.parts) {
+            if (part.number in progress.etags) continue
+            val uploaded = withRetry {
+                cloud.uploadAudioPart(id, progress.uploadId, part.number, audio, part.offset, part.length)
+            }
+            progress.etags[part.number] = uploaded.etag
+        }
+        withRetry { cloud.completeAudioMultipart(id, progress.uploadId, progress.uploaded()) }
+    }
+
+    /** Best-effort abort of an upload we are giving up on; R2 expires it anyway. */
+    private suspend fun abortQuietly(id: String, uploadId: String) {
+        try {
+            cloud.abortAudioMultipart(id, uploadId)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            // Nothing to do: the upload holds nothing visible and expires in 7 days.
+        }
     }
 
     /**

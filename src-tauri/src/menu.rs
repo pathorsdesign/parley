@@ -47,6 +47,9 @@ const CMD_PREFIX: &str = "cmd:";
 /// Event the frontend listens on; payload is the bare command id ("nav.home").
 const CMD_EVENT: &str = "menu://command";
 
+/// Id of our Quit item (see [`build`]).
+const QUIT_ITEM: &str = "app_quit";
+
 /// The main window's label (Tauri's default for the window in tauri.conf.json).
 const MAIN_WINDOW: &str = "main";
 
@@ -148,6 +151,14 @@ pub fn build<R: Runtime>(handle: &AppHandle<R>) -> tauri::Result<Menu<R>> {
         "Pause or Resume Recording",
         "Shift+CmdOrCtrl+P",
     )?;
+    #[cfg(target_os = "macos")]
+    let meeting_mute = command_item(
+        handle,
+        "main",
+        "meeting.toggleMicMute",
+        "Mute or Unmute Microphone",
+        "Shift+CmdOrCtrl+M",
+    )?;
 
     #[cfg(target_os = "macos")]
     let shortcuts = command_item(
@@ -156,6 +167,26 @@ pub fn build<R: Runtime>(handle: &AppHandle<R>) -> tauri::Result<Menu<R>> {
         "shortcuts.show",
         "Keyboard Shortcuts",
         "Shift+CmdOrCtrl+Slash",
+    )?;
+
+    // Quit is ours, not the predefined item: that one terminates the process
+    // on the spot, which threw away a live meeting's transcript (only its
+    // crash-journal audio survived). Ours runs the orderly quit in quit.rs —
+    // end the meeting, save it, then exit. The command table lists ⌘Q as
+    // owned by the menu (`app.quit`), so the webview never binds it.
+    #[cfg(not(any(
+        target_os = "linux",
+        target_os = "dragonfly",
+        target_os = "freebsd",
+        target_os = "netbsd",
+        target_os = "openbsd"
+    )))]
+    let quit = MenuItem::with_id(
+        handle,
+        QUIT_ITEM,
+        format!("Quit {}", pkg_info.name),
+        true,
+        Some("CmdOrCtrl+Q"),
     )?;
 
     // ── Diagnostics (unchanged) ─────────────────────────────────────────────
@@ -257,7 +288,7 @@ pub fn build<R: Runtime>(handle: &AppHandle<R>) -> tauri::Result<Menu<R>> {
                     &PredefinedMenuItem::hide(handle, None)?,
                     &PredefinedMenuItem::hide_others(handle, None)?,
                     &PredefinedMenuItem::separator(handle)?,
-                    &PredefinedMenuItem::quit(handle, None)?,
+                    &quit,
                 ],
             )?,
             #[cfg(not(any(
@@ -282,7 +313,7 @@ pub fn build<R: Runtime>(handle: &AppHandle<R>) -> tauri::Result<Menu<R>> {
                     // command table marks `window.close` as owned by the OS.
                     &PredefinedMenuItem::close_window(handle, None)?,
                     #[cfg(not(target_os = "macos"))]
-                    &PredefinedMenuItem::quit(handle, None)?,
+                    &quit,
                 ],
             )?,
             &Submenu::with_items(
@@ -337,7 +368,12 @@ pub fn build<R: Runtime>(handle: &AppHandle<R>) -> tauri::Result<Menu<R>> {
                 ],
             )?,
             #[cfg(target_os = "macos")]
-            &Submenu::with_items(handle, "Meeting", true, &[&meeting_start, &meeting_pause])?,
+            &Submenu::with_items(
+                handle,
+                "Meeting",
+                true,
+                &[&meeting_start, &meeting_pause, &meeting_mute],
+            )?,
             &window_menu,
             &diagnostics,
             &help_menu,
@@ -354,6 +390,7 @@ pub fn on_event<R: Runtime>(app: &AppHandle<R>, id: &str) {
         return;
     }
     match id {
+        QUIT_ITEM => crate::quit::request(app),
         // Open the standalone, movable Field Log window (the frontend listens for
         // this and opens/focuses the diagnostics webview). The window itself has a
         // "reveal in Finder" affordance for the on-disk rotating log folder.

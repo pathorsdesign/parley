@@ -523,8 +523,9 @@ fun HomeScreen(
             // While a meeting runs, the active-meeting card is the way back
             // to it; a Start button beside it would only start nothing. A
             // draft's page has its own Start, which starts from the draft —
-            // a second one below it would start a blank meeting instead.
-            if (!meetingLive && page !is LibraryPage.Draft) HomeBottomBar(onStart = onStartRecording)
+            // a second one below it would start a blank meeting instead; on
+            // the drafts list it would read as starting one of them.
+            if (!meetingLive && !page.isDraftPage) HomeBottomBar(onStart = onStartRecording)
         }
     }
 

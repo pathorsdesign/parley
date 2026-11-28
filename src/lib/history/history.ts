@@ -538,6 +538,10 @@ export async function saveLiveToHistory(
     throw e;
   }
   finishJournal(snap.id);
+  // A transcript that covers much less than the recording (a relay that never
+  // came back, a refused session, a quit mid-meeting) is re-transcribed from
+  // the file in the background (#728).
+  queueBackfill(entry.id);
 
   // A per-meeting MOVE to an org drops the personal original once the copy is
   // in, so there is no personal report to open — the copy must carry the
@@ -647,6 +651,13 @@ async function liveSpeechRate(snap: LiveMeetingSnapshot, audioTempPath: string):
   if (snap.micSessionRateHz != null) return snap.micSessionRateHz;
   const micOnlyRecording = !snap.analysis.segments.some((seg) => seg.source === "mix");
   return micOnlyRecording && !snap.orphan ? measureRecordingRate(audioTempPath) : null;
+}
+
+/** Queue a coverage backfill (lazily imported: it pulls in the batch lane). */
+function queueBackfill(id: string): void {
+  import("../meeting/coverageBackfill")
+    .then((m) => m.queueCoverageBackfill(id))
+    .catch((e) => log.warn("history: queueing the coverage backfill failed", { id, error: String(e) }));
 }
 
 function clearFinalizing(): void {
@@ -1327,6 +1338,8 @@ async function saveRecovered(
   };
   await persist(entry, r.path, /* compress */ false);
   log.warn("history: recovered an unfinished meeting", { id: r.meetingId, durationMs: r.durationMs });
+  // No transcript at all: the coverage check reads it as one whole-file gap.
+  queueBackfill(entry.id);
   return true;
 }
 

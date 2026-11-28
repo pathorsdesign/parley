@@ -289,6 +289,8 @@ pub fn run() {
             history::download_remote_audio,
             history::list_history,
             history::read_history_entry,
+            history::history_audio_size,
+            history::read_history_audio_range,
             history::rename_history_entry,
             history::delete_history_entry,
             history::read_transcript_file,

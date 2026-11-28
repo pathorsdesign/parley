@@ -290,6 +290,11 @@ export const voiceprintMatch = (args: { audioPath: string; speakers: { key: stri
 
 export const listHistory = () => invoke<string[]>("list_history");
 export const readHistoryEntry = (args: { id: string }) => invoke<HistoryReadResult>("read_history_entry", args);
+/** Size in bytes of an entry's recording, null when it has none (history.rs). */
+export const historyAudioSize = (args: { id: string }) => invoke<number | null>("history_audio_size", args);
+/** Raw bytes of an entry's recording from `offset` (≤ 64 MiB; fewer at the end). */
+export const readHistoryAudioRange = (args: { id: string; offset: number; length: number }) =>
+  invoke<ArrayBuffer>("read_history_audio_range", args);
 export const saveHistoryEntry = (args: {
   id: string;
   summaryJson: string;

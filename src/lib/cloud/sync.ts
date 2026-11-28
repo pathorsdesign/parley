@@ -41,6 +41,7 @@ import { useStore } from "../store";
 import type { HistoryEntry, HistoryEntrySummary } from "../history/types";
 import type { CloudRecordingSummary } from "./types";
 import * as ipc from "../ipc/commands";
+import { MULTIPART_THRESHOLD_BYTES, uploadAudioMultipart } from "./audioUpload";
 
 /**
  * Where a card lives. "stale" = present both places but the cloud copy is newer
@@ -246,20 +247,8 @@ async function followCloudDeletions<T extends { id: string }>(
   return local.filter((e) => !deleted.has(e.id));
 }
 
-/** The cloud's edge rejects any request body over 100 MB (an HTML 413), so a
- *  recording bigger than this can never be uploaded. A recording the desktop
- *  saved itself is compressed Opus (~22 MB per 2 h); only an upload whose format
- *  couldn't be compressed (webm, wma, …) and was kept as is gets this big. */
-export const CLOUD_AUDIO_LIMIT_BYTES = 100 * 1024 * 1024;
-
-// Ids skipped this session for audio over CLOUD_AUDIO_LIMIT_BYTES, so the skip
-// is logged once rather than on every sweep (every Library visit). Nothing is
-// uploaded for them either way: the size is checked before the audio is read.
-const oversizedLogged = new Set<string>();
-
-/** What one push did: uploaded, did nothing (signed out / sample / audio too
- *  large for the cloud), or found the id tombstoned in the cloud (now flagged,
- *  nothing written). */
+/** What one push did: uploaded, did nothing (signed out / sample), or found the
+ *  id tombstoned in the cloud (now flagged, nothing written). */
 export type PushOutcome = "pushed" | "skipped" | "gone";
 
 // One in-flight push per id. Two pushes for the SAME entry must not race: each
@@ -300,36 +289,12 @@ async function pushLocalEntryNow(id: string): Promise<PushOutcome> {
     logGoneOnce(id);
     return "gone";
   }
-  const { meta, audioPath, audioBytes } = await ipc.readHistoryEntry({ id });
-  // Audio the cloud would refuse: the PUT can only fail at the edge after
-  // reading and sending 100+ MB, again on every sweep. Skip the whole entry —
-  // the meta row is not pushed without its audio, since its summary would claim
-  // a recording other devices then fail to download. It stays local (and stays
-  // in the sweep, which re-checks only the size).
-  if (audioPath && typeof audioBytes === "number" && audioBytes > CLOUD_AUDIO_LIMIT_BYTES) {
-    if (!oversizedLogged.has(id)) {
-      oversizedLogged.add(id);
-      log.warn("cloud: recording audio too large to sync, kept local only", {
-        id,
-        audioBytes,
-        limitBytes: CLOUD_AUDIO_LIMIT_BYTES,
-      });
-    }
-    return "skipped";
-  }
+  const { meta, audioPath } = await ipc.readHistoryEntry({ id });
   let res: Response;
   try {
     // Upload the audio FIRST, then commit the summary row — so a row never claims
     // hasAudio before its blob exists (which would 404 a download on another device).
-    if (audioPath) {
-      // Read the local recording through the webview's asset channel, then upload it.
-      const buf = await (await fetch(convertFileSrc(audioPath))).arrayBuffer();
-      await cloudFetch(`/recordings/${id}/audio`, {
-        method: "PUT",
-        headers: { "Content-Type": "audio/ogg" },
-        body: buf,
-      });
-    }
+    if (audioPath) await uploadRecordingAudio(id, audioPath);
     const summary = buildSummary(meta);
     res = await cloudFetch(`/recordings/${id}`, {
       method: "POST",
@@ -350,6 +315,32 @@ async function pushLocalEntryNow(id: string): Promise<PushOutcome> {
   if (typeof updatedAt === "number") setSynced(id, updatedAt);
   log.info("cloud: pushed recording", { id, hasAudio: !!audioPath });
   return "pushed";
+}
+
+/**
+ * Upload one entry's recording. Over {@link MULTIPART_THRESHOLD_BYTES} it goes
+ * up in 32 MiB parts read from disk one at a time (pathorsAI/parley#755: the
+ * edge refuses bodies over 100 MB, so a ~9 h+ meeting could never sync);
+ * smaller files keep the single PUT, sent as a Blob rather than a copied
+ * ArrayBuffer.
+ */
+async function uploadRecordingAudio(id: string, audioPath: string): Promise<void> {
+  const size = await ipc.historyAudioSize({ id }).catch(() => null);
+  if (size != null && size > MULTIPART_THRESHOLD_BYTES) {
+    log.info("cloud: uploading recording in parts", { id, bytes: size });
+    await uploadAudioMultipart(id, size, {
+      cloudFetch,
+      readRange: (offset, length) => ipc.readHistoryAudioRange({ id, offset, length }),
+    });
+    return;
+  }
+  // Read the local recording through the webview's asset channel, then upload it.
+  const blob = await (await fetch(convertFileSrc(audioPath))).blob();
+  await cloudFetch(`/recordings/${id}/audio`, {
+    method: "PUT",
+    headers: { "Content-Type": "audio/ogg" },
+    body: blob,
+  });
 }
 
 /** Best-effort push of one entry — never throws (used from save paths). */

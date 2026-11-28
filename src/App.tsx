@@ -219,6 +219,8 @@ const App = () => {
     track(listenForViewLogsMenu());
     const recordingSaved = listenForRecordingSaved();
     track(recordingSaved);
+    let stopSweep: (() => void) | null = null;
+    let disposed = false;
     // A meeting the backend kept recording while this page was gone (it
     // reloaded under a running capture): stop and save it, once the listener
     // that saves it is up.
@@ -228,7 +230,17 @@ const App = () => {
       // Then the meetings that were still recording when Parley last died
       // (crash, quit, force-quit): their crash journals become recordings.
       .then(() => recoverCrashedMeetings())
-      .catch((error) => log.warn("meeting: crash recovery failed", { error: String(error) }));
+      .catch((error) => log.warn("meeting: crash recovery failed", { error: String(error) }))
+      // Then the backfills a short transcript is still owed (#728), and the
+      // background cloud sweep, so a recording whose push failed reaches the
+      // cloud without the library being opened.
+      .then(async () => {
+        const { drainCoverageBackfills } = await import("./lib/meeting/coverageBackfill");
+        void drainCoverageBackfills();
+        const { startBackgroundSweep } = await import("./lib/cloud/backgroundSweep");
+        if (!disposed) stopSweep = startBackgroundSweep();
+      })
+      .catch((error) => log.warn("startup: backfill / cloud sweep failed to start", { error: String(error) }));
     // The history://open + history://import listeners are gone with the standalone
     // History window (#195): the library is a route in THIS window now, so it
     // opens an entry by calling loadHistoryEntry directly.
@@ -261,6 +273,8 @@ const App = () => {
     // only: this window records).
     const unMeetingDetect = initMeetingDetect();
     return () => {
+      disposed = true;
+      stopSweep?.();
       listeners.dispose();
       unTemplates();
       unSession();

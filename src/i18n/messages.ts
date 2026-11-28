@@ -1385,6 +1385,10 @@ export const zhTW = {
     "目前只錄到你的麥克風——對方的聲音不會出現在逐字稿（擷取不到任何輸出裝置，請確認喇叭或耳機已連接）。",
   "meeting.transcription.reconnectingBanner":
     "轉錄連線中斷，正在重新連線…錄音仍在進行。短暫中斷時說的話會補進逐字稿；斷線較久的部分仍完整保留在錄音裡，只是不會出現在即時逐字稿。",
+  "meeting.transcription.refusedBanner.auth":
+    "Parley Cloud 暫時不接受這場會議的即時轉錄（登入狀態未通過驗證），會自動每隔幾分鐘重試。錄音仍在進行，結束後會用錄音補齊逐字稿；若一直沒恢復，請到設定重新登入。",
+  "meeting.transcription.refusedBanner.quota":
+    "Parley Cloud 的轉錄額度已用完，即時轉錄暫停，會自動每隔幾分鐘重試。錄音仍在進行，完整保留在錄音裡。",
   "meeting.transcription.noAudioBanner":
     "轉錄已暫停：Parley 沒有收到任何音訊。請確認麥克風仍連接且未被其他 App 占用；一有聲音就會自動恢復轉錄。",
   "common.dismiss": "關閉",
@@ -3211,6 +3215,10 @@ export const en = {
     "Only your mic is being recorded — the other party won't appear in the transcript (no output device could be captured; check that speakers or headphones are connected).",
   "meeting.transcription.reconnectingBanner":
     "Transcription dropped — reconnecting… The recording is still running. What's said during a short drop catches up in the transcript; a longer gap is kept in the recording but won't appear in the live transcript.",
+  "meeting.transcription.refusedBanner.auth":
+    "Parley Cloud isn't accepting live transcription for this meeting right now (your sign-in wasn't accepted). It retries every few minutes. The recording is still running, and the transcript is filled in from it after the meeting; if this doesn't clear, sign in again in Settings.",
+  "meeting.transcription.refusedBanner.quota":
+    "Your Parley Cloud transcription quota is used up, so live transcription is paused. It retries every few minutes. The recording is still running and keeps everything that is said.",
   "meeting.transcription.noAudioBanner":
     "Transcription paused — Parley isn't receiving any audio. Check that your microphone is still connected and not taken by another app; transcription resumes by itself as soon as sound comes in.",
   "common.dismiss": "Dismiss",

@@ -121,8 +121,8 @@ export async function listenForTranscriptionLink(): Promise<UnlistenFn> {
     const p = event.payload;
     const store = useLiveStore.getState();
     if (p.state === "reconnecting") {
-      log.info("meeting: transcription reconnecting", { source: p.source, attempt: p.attempt });
-      store.reportTranscriptionLink(p.source, "reconnecting");
+      log.info("meeting: transcription reconnecting", { source: p.source, attempt: p.attempt, reason: p.reason });
+      store.reportTranscriptionLink(p.source, "reconnecting", p.reason ?? null);
       return;
     }
     if (p.state === "no_audio") {

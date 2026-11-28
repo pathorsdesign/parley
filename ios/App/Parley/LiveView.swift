@@ -69,6 +69,11 @@ struct LiveView: View {
     /// The last `TabRouter.draftStartRequest` acted on.
     /// The 查看會議草稿 sheet is up.
     @State private var showingDraft = false
+    #if DEBUG
+        /// `record-draft` opens the sheet once, on launch — never again when the
+        /// record screen comes back, e.g. after 開始 on a draft in the Library.
+        @State private var demoOpenedDraft = false
+    #endif
     @State private var handledDraftStart = 0
     /// The draft the meeting now starting was started from, until the
     /// microphone is open (then the draft is hidden) or the start fails.
@@ -178,7 +183,10 @@ struct LiveView: View {
                     ScreenshotDemo.seedRecordScreen(recorder)
                     if recorder.isInMeeting { await loadFolders() }
                     // `record-draft` opens the draft sheet with nobody tapping.
-                    if ScreenshotDemo.shared.showDraftMeeting, recorder.meetingDraft != nil {
+                    if ScreenshotDemo.shared.showDraftMeeting, !demoOpenedDraft,
+                        recorder.meetingDraft != nil
+                    {
+                        demoOpenedDraft = true
                         try? await Task.sleep(for: .milliseconds(800))
                         showingDraft = true
                     }

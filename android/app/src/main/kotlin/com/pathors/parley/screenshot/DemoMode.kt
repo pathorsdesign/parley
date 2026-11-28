@@ -1290,6 +1290,7 @@ object DemoMode {
     private val MEETING_ROUTES = mapOf(
         "record-idle" to MeetingScenario.IDLE,
         "record-paused" to MeetingScenario.PAUSED,
+        ROUTE_RECORD_FROM_DRAFT to MeetingScenario.DRAFT,
         ROUTE_RECORD_DRAFT to MeetingScenario.DRAFT,
         MeetingScenario.SETTLED.route to MeetingScenario.SETTLED,
         MeetingScenario.ADJUST.route to MeetingScenario.ADJUST,
@@ -1322,7 +1323,10 @@ object DemoMode {
             meetingContext = draft.meetingContext,
             draftId = draft.id,
             draft = DraftSnapshot(draft, renewals),
-            agenda = MeetingAgenda.fromDraft(draft.todos),
+            // The first item already ticked, so the frames show a done item.
+            agenda = MeetingAgenda.fromDraft(draft.todos).let { agenda ->
+                agenda.firstOrNull()?.let { MeetingAgenda.toggle(agenda, it.id) } ?: agenda
+            },
         )
     }
 
@@ -1414,6 +1418,9 @@ object DemoMode {
     private const val ROUTE_OFF = "off"
     private const val QUERY_SCENARIO = "scenario"
     private const val ROUTE_RECORD_DRAFT = "record-draft"
+
+    /** The same meeting as [ROUTE_RECORD_DRAFT], its sheet closed: the record screen itself. */
+    private const val ROUTE_RECORD_FROM_DRAFT = "record-from-draft"
 
     /** A fixed clock, so a re-capture months later produces identical frames. */
     private const val EPOCH_MS = 1_786_498_800_000.0

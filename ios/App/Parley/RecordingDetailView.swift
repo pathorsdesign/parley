@@ -633,14 +633,14 @@ struct RecordingDetailView: View {
             text = ([split.lead] + split.sections.map { "## \($0.title)\n\($0.body)" })
                 .filter { !$0.isEmpty }.joined(separator: "\n\n")
         case .actions:
-            let items = meta.actionItems.map { item in
-                "- [\(item.done ? "x" : " ")] \(item.text)"
-                    + (item.owner.map { " (\($0))" } ?? "")
-                    + (item.atMs.map { " [\(TranscriptClipboard.clock($0))]" } ?? "")
+            // As the page groups them: each owner's name on its own line, their
+            // items one per line under it, a blank line between owners — plain
+            // text that pastes cleanly into a chat or a note.
+            text = meta.actionItemsByOwner.map { group in
+                ([group.name ?? String(localized: "Unassigned")] + group.items.map(\.text))
+                    .joined(separator: "\n")
             }
-            let next = BriefSections.split(meta.brief).next.map { "## \($0.title)\n\($0.body)" }
-            text = ((items.isEmpty ? [] : [items.joined(separator: "\n")]) + next)
-                .joined(separator: "\n\n")
+            .joined(separator: "\n\n")
         case .notes: text = notes(meta)
         case .context: text = background(meta)
         case .delivery, .replay: return nil
